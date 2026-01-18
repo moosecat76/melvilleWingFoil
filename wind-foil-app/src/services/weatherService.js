@@ -41,6 +41,7 @@ export const processChartData = (data) => {
 
         return {
             time: t,
+            rawDate: date, // For filtering logic
             // Format: "Mon 10:00" or just "10:00" depending on generic needs, 
             // but for 7 days, we definitely need Day + Time
             label: format(date, 'EEE HH:mm'),

@@ -1,14 +1,37 @@
 import React, { useState, useEffect } from 'react';
-import { Wind, Navigation, Calendar, ThumbsUp, ThumbsDown, ArrowUp, AlertTriangle } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, ComposedChart, ReferenceLine } from 'recharts';
+import { Wind, Navigation, Calendar, ThumbsUp, ThumbsDown, ArrowUp, AlertTriangle, Anchor } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, ComposedChart, ReferenceLine, Label } from 'recharts';
 import { getWeatherForecast, processChartData } from './services/weatherService';
+
+const CustomArrowDot = (props) => {
+  const { cx, cy, payload, index } = props;
+  // Show arrow every 3rd point to avoid clutter (every 3 hours)
+  if (index % 3 !== 0) return null;
+
+  return (
+    <svg x={cx - 10} y={cy - 10} width={20} height={20} style={{ overflow: 'visible' }}>
+      <line
+        x1="10" y1="10" x2="10" y2="-5"
+        stroke="var(--accent-primary)"
+        strokeWidth="2"
+        transform={`rotate(${payload.direction + 180} 10 10)`}
+      />
+      <polygon
+        points="10,-8 6,0 14,0"
+        fill="var(--accent-primary)"
+        transform={`rotate(${payload.direction + 180} 10 10)`}
+      />
+    </svg>
+  );
+};
 
 function App() {
   const [data, setData] = useState([]);
   const [current, setCurrent] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [unit, setUnit] = useState('kmh'); // 'kmh' or 'knots'
+
+  const [unit, setUnit] = useState('knots'); // Default to knots
 
   useEffect(() => {
     const fetchData = async () => {
@@ -38,11 +61,13 @@ function App() {
     fetchData();
   }, []);
 
-  // Helper: Convert speed based on unit
-  const formatSpeed = (speed) => {
-    if (speed == null) return '-';
-    if (unit === 'knots') return (speed * 0.539957).toFixed(1);
-    return Math.round(speed); // km/h usually integer is fine, or 1 decimal
+  const formatSpeed = (val) => {
+    // For display in text (already converted in chartData for chart)
+    // If passing raw km/h, convert.
+    // But we will use this mainly for text display of raw 'current' which is still km/h.
+    if (val == null) return '-';
+    if (unit === 'knots') return (val * 0.539957).toFixed(1);
+    return Math.round(val);
   };
 
   const getWindRating = (speedKmh) => {
@@ -58,20 +83,37 @@ function App() {
     return { label: 'Excellent', color: 'var(--status-success)', icon: <ThumbsUp /> };
   };
 
+  const getGearRecommendation = (speedKmh) => {
+    if (!speedKmh) return { text: "No wind data", sub: "" };
+    const knots = speedKmh * 0.539957;
+
+    if (knots < 10) return { text: "Light Wind Gear", sub: "Large Foil / 6m+ Wing or Surf" };
+    if (knots < 15) return { text: "5m - 6m Wing", sub: "Standard Foil" };
+    if (knots < 22) return { text: "4m - 5m Wing", sub: "Small-Med Foil" };
+    return { text: "3m - 4m Wing (Small)", sub: "High Wind Foil!" };
+  };
+
   if (loading) return <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>Loading Forecast...</div>;
   if (error) return <div className="app-container">Error: {error}</div>;
 
   const currentRating = current ? getWindRating(current.speed) : { label: '-', color: 'grey' };
+  const gear = getGearRecommendation(current?.speed);
+
+  // Display strings for Current Card (source is always km/h)
   const displayedSpeed = formatSpeed(current?.speed);
   const displayedGusts = formatSpeed(current?.gusts);
   const unitLabel = unit === 'knots' ? 'knots' : 'km/h';
 
-  // For chart specific rendering
-  const chartData = data.map(d => ({
-    ...d,
-    // Pre-calculate display values for tooltip if needed, or handle in formatter
-    // storing raw km/h for the chart scaling usually best, format in tick/tooltip
-  }));
+  // Prepare Chart Data: Convert values upfront for "Logical Scale" support in Recharts
+  const chartData = data.map(d => {
+    const s = unit === 'knots' ? d.speed * 0.539957 : d.speed;
+    const g = unit === 'knots' ? d.gusts * 0.539957 : d.gusts;
+    return {
+      ...d,
+      chartSpeed: Number(s.toFixed(1)), // Ensure number for chart
+      chartGusts: Number(g.toFixed(1))
+    };
+  });
 
   return (
     <div className="app-container">
@@ -161,18 +203,14 @@ function App() {
             </div>
           </div>
 
-          {/* Status / Insight Card */}
+          {/* Status & Gear */}
           <div className="glass-panel" style={{ padding: '2rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
               <div>
-                <h3 className="card-title">Foil Forecast</h3>
+                <h3 className="card-title">Forecast Status</h3>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem' }}>
-                  <div style={{ color: currentRating.color }}>
-                    {React.cloneElement(currentRating.icon, { size: 32 })}
-                  </div>
-                  <span style={{ fontSize: '1.5rem', fontWeight: 700, color: currentRating.color }}>
-                    {currentRating.label}
-                  </span>
+                  <div style={{ color: currentRating.color }}>{React.cloneElement(currentRating.icon, { size: 32 })}</div>
+                  <span style={{ fontSize: '1.5rem', fontWeight: 700, color: currentRating.color }}>{currentRating.label}</span>
                 </div>
               </div>
             </div>
@@ -184,16 +222,22 @@ function App() {
               </div>
             )}
 
-            <p style={{ color: 'var(--text-secondary)', marginTop: '1rem', lineHeight: '1.5' }}>
-              Looking ahead <strong>7 days</strong>. Check the chart for trends.
-            </p>
+            <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '1rem', alignItems: 'center' }}>
+              <Anchor size={24} color="var(--accent-primary)" />
+              <div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Recommended Gear</div>
+                <div style={{ fontWeight: 600, fontSize: '1.1rem', color: 'var(--text-primary)' }}>{gear.text}</div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{gear.sub}</div>
+              </div>
+            </div>
           </div>
         </div>
 
         {/* Main Chart */}
         <div className="glass-panel" style={{ padding: '2rem', height: '400px' }}>
-          <h3 className="card-title">Wind Forecast (Next 7 Days)</h3>
+          <h3 className="card-title">7-Day Forecast (Arrows show direction)</h3>
           <ResponsiveContainer width="100%" height="100%">
+            {/* Use chartData which has converted units */}
             <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="colorSpeed" x1="0" y1="0" x2="0" y2="1">
@@ -202,47 +246,92 @@ function App() {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" opacity={0.1} vertical={false} />
+
               <XAxis
                 dataKey="label"
                 stroke="var(--text-secondary)"
                 fontSize={12}
                 tickMargin={10}
-                interval={23} // Show rough daily markers? 24h * 7 = 168 points. interval 23 approx 1 day
+                minTickGap={30} // Prevent overlapping by ensuring min gap
               />
+
               <YAxis
                 stroke="var(--text-secondary)"
                 fontSize={12}
+                domain={[0, 'auto']}
+                allowDecimals={false} // Force integers for clean scale
                 label={{
                   value: `Speed (${unitLabel})`,
                   angle: -90,
                   position: 'insideLeft',
                   style: { textAnchor: 'middle', fill: 'var(--text-secondary)' }
                 }}
-                tickFormatter={(val) => formatSpeed(val)}
               />
+
               <Tooltip
-                contentStyle={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-color)', color: 'var(--text-primary)' }}
-                itemStyle={{ color: 'var(--text-primary)' }}
-                labelStyle={{ color: 'var(--accent-primary)' }}
-                formatter={(value, name) => [formatSpeed(value), name === 'speed' ? 'Wind Speed' : name]}
-                labelFormatter={(label, payload) => {
-                  if (payload && payload.length > 0) {
-                    return payload[0].payload.displayDate + ' ' + label;
+                content={({ active, payload, label }) => {
+                  if (active && payload && payload.length) {
+                    const data = payload[0].payload;
+                    return (
+                      <div style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', padding: '10px', borderRadius: '8px' }}>
+                        <p style={{ color: 'var(--accent-primary)', marginBottom: '5px', fontWeight: 600 }}>{data.displayDate} {data.label}</p>
+                        <p style={{ color: 'var(--text-primary)', margin: 0 }}>
+                          Speed: <strong>{data.chartSpeed}</strong> {unitLabel}
+                        </p>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', margin: 0 }}>
+                          Gusts: {data.chartGusts} {unitLabel}
+                        </p>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '5px', color: 'var(--text-secondary)' }}>
+                          Direction: {data.direction}°
+                          <ArrowUp size={14} style={{ transform: `rotate(${data.direction + 180}deg)` }} />
+                        </div>
+                      </div>
+                    );
                   }
-                  return label;
+                  return null;
                 }}
               />
 
-              <ReferenceLine x={current?.label} stroke="var(--text-secondary)" strokeDasharray="3 3" label={{ value: "NOW", fill: "var(--text-secondary)", fontSize: 10 }} />
+              {/* Day Separators - Vertical Grid Lines at Midnight */}
+              {chartData.map((d) => {
+                if (d.rawDate.getHours() === 0) {
+                  return (
+                    <ReferenceLine
+                      key={d.label}
+                      x={d.label}
+                      stroke="var(--border-color)"
+                      strokeOpacity={0.8}
+                      strokeDasharray="3 3"
+                      label={{
+                        value: d.rawDate.toLocaleDateString('en-US', { weekday: 'long' }),
+                        position: 'insideTopRight',
+                        fill: 'var(--text-secondary)',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        dy: 10 // Push label down slightly from top edge
+                      }}
+                    />
+                  );
+                }
+                return null;
+              })}
+
+              {/* Ensure x matches a label exactly. 'current' comes from processed, which is in chartData. */}
+              {current && (
+                <ReferenceLine x={current.label} stroke="var(--accent-secondary)" strokeDasharray="3 3" isFront>
+                  <Label value="NOW" position="insideTop" offset={10} fill="var(--accent-secondary)" fontSize={12} fontWeight="bold" />
+                </ReferenceLine>
+              )}
 
               <Area
                 type="monotone"
-                dataKey="speed"
+                dataKey="chartSpeed"
                 name="speed"
                 stroke="var(--accent-primary)"
                 fillOpacity={1}
                 fill="url(#colorSpeed)"
                 strokeWidth={2}
+                dot={<CustomArrowDot />}
               />
 
             </ComposedChart>
