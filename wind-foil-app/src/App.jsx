@@ -1,24 +1,28 @@
 import React, { useState, useEffect } from 'react';
+import { format } from 'date-fns';
 import { Wind, Navigation, Calendar, ThumbsUp, ThumbsDown, ArrowUp, AlertTriangle, Anchor } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, ComposedChart, ReferenceLine, Label } from 'recharts';
 import { getWeatherForecast, processChartData } from './services/weatherService';
+import MapComponent from './components/MapComponent';
 
 const CustomArrowDot = (props) => {
-  const { cx, cy, payload, index } = props;
+  const { cx, cy, payload, index, getWindRating } = props;
   // Show arrow every 3rd point to avoid clutter (every 3 hours)
   if (index % 3 !== 0) return null;
+
+  const rating = getWindRating(payload.speed, payload.direction);
 
   return (
     <svg x={cx - 10} y={cy - 10} width={20} height={20} style={{ overflow: 'visible' }}>
       <line
         x1="10" y1="10" x2="10" y2="-5"
-        stroke="var(--accent-primary)"
+        stroke={rating.color}
         strokeWidth="2"
         transform={`rotate(${payload.direction + 180} 10 10)`}
       />
       <polygon
         points="10,-8 6,0 14,0"
-        fill="var(--accent-primary)"
+        fill={rating.color}
         transform={`rotate(${payload.direction + 180} 10 10)`}
       />
     </svg>
@@ -70,17 +74,27 @@ function App() {
     return Math.round(val);
   };
 
-  const getWindRating = (speedKmh) => {
+  const getWindRating = (speedKmh, direction) => {
     if (speedKmh == null) return { label: 'N/A', color: 'var(--text-secondary)', icon: <Wind /> };
 
-    // Limits in km/h
-    // < 18 km/h (approx 10 knots) -> Light
-    // 18-28 km/h (10-15 knots) -> Good
-    // > 28 km/h (15 knots) -> Excellent
+    // Ideal direction for Melville Waters: S to SW (approx 135 to 270 degrees)
+    const isIdealDirection = direction >= 135 && direction <= 270;
 
-    if (speedKmh < 18) return { label: 'Light', color: 'var(--text-secondary)', icon: <ThumbsDown /> };
-    if (speedKmh < 28) return { label: 'Good', color: 'var(--accent-primary)', icon: <ThumbsUp /> };
-    return { label: 'Excellent', color: 'var(--status-success)', icon: <ThumbsUp /> };
+    if (speedKmh < 18) {
+      return { label: 'Light', color: 'var(--text-secondary)', icon: <ThumbsDown /> };
+    }
+
+    if (speedKmh < 28) {
+      if (isIdealDirection) {
+        return { label: 'Good (S/SW)', color: 'var(--status-success)', icon: <ThumbsUp /> };
+      }
+      return { label: 'Good (Gusty)', color: 'var(--status-warning)', icon: <ThumbsUp /> };
+    }
+
+    if (isIdealDirection) {
+      return { label: 'Excellent', color: 'var(--status-success)', icon: <ThumbsUp /> };
+    }
+    return { label: 'Strong (Gusty)', color: 'var(--status-warning)', icon: <ThumbsUp /> };
   };
 
   const getGearRecommendation = (speedKmh) => {
@@ -96,7 +110,7 @@ function App() {
   if (loading) return <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>Loading Forecast...</div>;
   if (error) return <div className="app-container">Error: {error}</div>;
 
-  const currentRating = current ? getWindRating(current.speed) : { label: '-', color: 'grey' };
+  const currentRating = current ? getWindRating(current.speed, current.direction) : { label: '-', color: 'grey' };
   const gear = getGearRecommendation(current?.speed);
 
   // Display strings for Current Card (source is always km/h)
@@ -248,11 +262,15 @@ function App() {
               <CartesianGrid strokeDasharray="3 3" opacity={0.1} vertical={false} />
 
               <XAxis
-                dataKey="label"
+                dataKey="time"
                 stroke="var(--text-secondary)"
                 fontSize={12}
                 tickMargin={10}
-                minTickGap={30} // Prevent overlapping by ensuring min gap
+                minTickGap={60}
+                tickFormatter={(val) => {
+                  const d = new Date(val);
+                  return format(d, 'EEE HH:mm');
+                }}
               />
 
               <YAxis
@@ -297,8 +315,8 @@ function App() {
                 if (d.rawDate.getHours() === 0) {
                   return (
                     <ReferenceLine
-                      key={d.label}
-                      x={d.label}
+                      key={d.time}
+                      x={d.time}
                       stroke="var(--border-color)"
                       strokeOpacity={0.8}
                       strokeDasharray="3 3"
@@ -316,10 +334,10 @@ function App() {
                 return null;
               })}
 
-              {/* Ensure x matches a label exactly. 'current' comes from processed, which is in chartData. */}
+              {/* Ensure x matches a time exactly. 'current' comes from processed, which is in chartData. */}
               {current && (
-                <ReferenceLine x={current.label} stroke="var(--accent-secondary)" strokeDasharray="3 3" isFront>
-                  <Label value="NOW" position="insideTop" offset={10} fill="var(--accent-secondary)" fontSize={12} fontWeight="bold" />
+                <ReferenceLine x={current.time} stroke="#ff4757" strokeDasharray="5 5" strokeWidth={3} isFront>
+                  <Label value="NOW" position="insideTop" offset={10} fill="#ff4757" fontSize={14} fontWeight="bold" />
                 </ReferenceLine>
               )}
 
@@ -331,21 +349,26 @@ function App() {
                 fillOpacity={1}
                 fill="url(#colorSpeed)"
                 strokeWidth={2}
-                dot={<CustomArrowDot />}
+                dot={<CustomArrowDot getWindRating={getWindRating} />}
               />
 
             </ComposedChart>
           </ResponsiveContainer>
         </div>
 
+        {/* Map Panel */}
+        <div className="glass-panel" style={{ padding: '2rem' }}>
+          <h3 className="card-title">Launch Location</h3>
+          <MapComponent lat={-32.041} lng={115.801} />
+        </div>
+
       </main>
 
       <footer style={{ marginTop: '4rem', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-        <p>Data provided by Open-Meteo API</p>
+        <p>Data provided by Open-Meteo API & OpenStreetMap</p>
       </footer>
     </div>
   );
 }
 
 export default App;
-
