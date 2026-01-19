@@ -137,7 +137,7 @@ function App() {
             Melville Wing Foil
           </h1>
           <p style={{ color: 'var(--text-secondary)', marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Navigation size={16} /> -32.04, 115.80
+            <Navigation size={16} /> -32.01, 115.83
           </p>
         </div>
 
@@ -359,7 +359,7 @@ function App() {
         {/* Map Panel */}
         <div className="glass-panel" style={{ padding: '2rem' }}>
           <h3 className="card-title">Launch Location</h3>
-          <MapComponent lat={-32.041} lng={115.801} />
+          <MapComponent lat={-32.01303172472861} lng={115.82947437392544} />
         </div>
 
       </main>

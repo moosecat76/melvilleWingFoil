@@ -4,8 +4,8 @@ import { format, isAfter, subHours } from 'date-fns';
 const BASE_URL_FORECAST = 'https://api.open-meteo.com/v1/forecast';
 
 const COORDS = {
-    latitude: -32.041,
-    longitude: 115.801,
+    latitude: -32.01303172472861,
+    longitude: 115.82947437392544,
 };
 
 export const getWeatherForecast = async () => {
