@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
-import { Wind, Navigation, Calendar, ThumbsUp, ThumbsDown, ArrowUp, AlertTriangle, Anchor } from 'lucide-react';
+import { Wind, Navigation, Calendar, ThumbsUp, ThumbsDown, ArrowUp, AlertTriangle, Anchor, Waves } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, ComposedChart, ReferenceLine, Label } from 'recharts';
-import { getWeatherForecast, processChartData } from './services/weatherService';
+import { getWeatherForecast, getTideForecast, getActualWeather, processChartData } from './services/weatherService';
+
 import MapComponent from './components/MapComponent';
+import GearSelector from './components/GearSelector';
 
 const CustomArrowDot = (props) => {
   const { cx, cy, payload, index, getWindRating } = props;
@@ -32,8 +34,17 @@ const CustomArrowDot = (props) => {
 function App() {
   const [data, setData] = useState([]);
   const [current, setCurrent] = useState(null);
+
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Phase 4: Gear State
+  const [userGear, setUserGear] = useState(() => {
+    const saved = localStorage.getItem('melvill_user_gear');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [showGearSelector, setShowGearSelector] = useState(false);
 
   const [unit, setUnit] = useState('knots'); // Default to knots
 
@@ -43,16 +54,30 @@ function App() {
         setLoading(true);
         // Single call now handles both history and forecast
         const rawData = await getWeatherForecast();
-        const processed = processChartData(rawData);
+        const tideData = await getTideForecast();
+        const actualWeather = await getActualWeather();
+        const processed = processChartData(rawData, tideData);
         setData(processed);
 
-        // Find current conditions (closest hour to now)
-        const now = new Date();
-        const closest = processed.reduce((prev, curr) => {
-          return (Math.abs(new Date(curr.time) - now) < Math.abs(new Date(prev.time) - now) ? curr : prev);
-        });
-
-        setCurrent(closest || processed[0]);
+        // Allow 'current' to be the REAL actual weather if available, else closest forecast
+        // We'll store actual in a separate state or just prefer it for the "Current" card
+        if (actualWeather) {
+          // Verify actualWeather is recent (e.g. within 2 hours)
+          const diffHours = Math.abs(new Date() - actualWeather.time) / 36e5;
+          if (diffHours < 3) {
+            setCurrent({ ...actualWeather, isActual: true });
+          } else {
+            // Fallback to forecast if observation is stale
+            console.log('Observation stale, using forecast');
+            setCurrent(processed.find(p => new Date(p.time).getHours() === new Date().getHours()));
+          }
+        } else {
+          const now = new Date();
+          const closest = processed.reduce((prev, curr) => {
+            return (Math.abs(new Date(curr.time) - now) < Math.abs(new Date(prev.time) - now) ? curr : prev);
+          });
+          setCurrent(closest || processed[0]);
+        }
 
       } catch (err) {
         console.error(err);
@@ -64,6 +89,11 @@ function App() {
 
     fetchData();
   }, []);
+
+  // Save gear when updated
+  useEffect(() => {
+    localStorage.setItem('melvill_user_gear', JSON.stringify(userGear));
+  }, [userGear]);
 
   const formatSpeed = (val) => {
     // For display in text (already converted in chartData for chart)
@@ -101,10 +131,54 @@ function App() {
     if (!speedKmh) return { text: "No wind data", sub: "" };
     const knots = speedKmh * 0.539957;
 
-    if (knots < 10) return { text: "Light Wind Gear", sub: "Large Foil / 6m+ Wing or Surf" };
-    if (knots < 15) return { text: "5m - 6m Wing", sub: "Standard Foil" };
-    if (knots < 22) return { text: "4m - 5m Wing", sub: "Small-Med Foil" };
-    return { text: "3m - 4m Wing (Small)", sub: "High Wind Foil!" };
+    let recText = "";
+    let recSub = "";
+
+    // 1. Determine generic bucket
+    if (knots < 10) {
+      recText = "Light Wind Gear";
+      recSub = "Large Foil / 6m+ Wing or Surf";
+    } else if (knots < 15) {
+      recText = "5m - 6m Wing";
+      recSub = "Standard Foil";
+    } else if (knots < 22) {
+      recText = "4m - 5m Wing";
+      recSub = "Small-Med Foil";
+    } else {
+      recText = "3m - 4m Wing (Small)";
+      recSub = "High Wind Foil!";
+    }
+
+    // 2. Personalize if user has gear
+    if (userGear.length > 0) {
+      // Filter for wings
+      const wings = userGear.filter(g => g.type === 'wing').sort((a, b) => b.size - a.size); // Descending size
+
+      if (wings.length > 0) {
+        let selectedWing = null;
+
+        // Simple matching logic
+        if (knots < 12) selectedWing = wings[0]; // Largest
+        else if (knots > 25) selectedWing = wings[wings.length - 1]; // Smallest
+        else {
+          // Find wing closest to ideal size for this wind
+          // Rule of thumb: Speed * Size ~= constant? Or just buckets.
+          // 15 knots ~= 5m. 20 knots ~= 4m.
+          const idealSize = 75 / knots; // e.g. 75/15 = 5m. 75/20 = 3.75m. 75/12 = 6.25m.
+
+          selectedWing = wings.reduce((prev, curr) => {
+            return (Math.abs(curr.size - idealSize) < Math.abs(prev.size - idealSize) ? curr : prev);
+          });
+        }
+
+        if (selectedWing) {
+          recText = `Use your ${selectedWing.size}m ${selectedWing.model}`;
+          recSub = `(Personalized for ${knots.toFixed(1)} kts)`;
+        }
+      }
+    }
+
+    return { text: recText, sub: recSub };
   };
 
   if (loading) return <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>Loading Forecast...</div>;
@@ -177,6 +251,9 @@ function App() {
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
                 <span className="metric-value">{displayedSpeed}</span>
                 <span className="metric-label">{unitLabel}</span>
+                {current?.isActual && (
+                  <span style={{ fontSize: '0.75rem', color: 'var(--status-success)', fontWeight: 600, border: '1px solid var(--status-success)', padding: '2px 6px', borderRadius: '4px' }}>LIVE</span>
+                )}
               </div>
               <div style={{ marginTop: '0.25rem', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
                 Gusts: <span style={{ color: 'var(--text-primary)' }}>{displayedGusts}</span> {unitLabel}
@@ -238,10 +315,50 @@ function App() {
 
             <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '1rem', alignItems: 'center' }}>
               <Anchor size={24} color="var(--accent-primary)" />
-              <div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Recommended Gear</div>
-                <div style={{ fontWeight: 600, fontSize: '1.1rem', color: 'var(--text-primary)' }}>{gear.text}</div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{gear.sub}</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Recommended Gear</div>
+                  <button
+                    onClick={() => setShowGearSelector(!showGearSelector)}
+                    style={{ fontSize: '0.75rem', color: 'var(--accent-primary)', background: 'none', border: '1px solid var(--accent-primary)', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer' }}
+                  >
+                    {userGear.length > 0 ? 'Edit Quiver' : 'Add My Gear'}
+                  </button>
+                </div>
+                {showGearSelector ? (
+                  <div style={{ marginTop: '1rem' }}>
+                    <GearSelector
+                      currentGear={userGear}
+                      onSave={(items) => setUserGear(items)}
+                      onClose={() => setShowGearSelector(false)}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ fontWeight: 600, fontSize: '1.1rem', color: 'var(--text-primary)', marginTop: '0.25rem' }}>{gear.text}</div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{gear.sub}</div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Tides Card */}
+            <div className="glass-panel" style={{ padding: '2rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                <Waves size={24} color="var(--accent-primary)" />
+                <h3 className="card-title" style={{ margin: 0 }}>Tide Info</h3>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'end' }}>
+                <div>
+                  <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Current Level</div>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {current?.tide ? `${current.tide.toFixed(2)} m` : '-'}
+                  </div>
+                </div>
+                {current?.tide < 0.8 && (
+                  <span style={{ color: 'var(--status-warning)', fontWeight: 600, fontSize: '0.9rem' }}>Low Tide Alert!</span>
+                )}
               </div>
             </div>
           </div>
@@ -274,6 +391,7 @@ function App() {
               />
 
               <YAxis
+                yAxisId="wind"
                 stroke="var(--text-secondary)"
                 fontSize={12}
                 domain={[0, 'auto']}
@@ -284,6 +402,15 @@ function App() {
                   position: 'insideLeft',
                   style: { textAnchor: 'middle', fill: 'var(--text-secondary)' }
                 }}
+              />
+              <YAxis
+                yAxisId="tide"
+                orientation="right"
+                stroke="var(--accent-primary)"
+                fontSize={12}
+                domain={['auto', 'auto']}
+                hide={false}
+                tickFormatter={(val) => `${val}m`}
               />
 
               <Tooltip
@@ -350,6 +477,17 @@ function App() {
                 fill="url(#colorSpeed)"
                 strokeWidth={2}
                 dot={<CustomArrowDot getWindRating={getWindRating} />}
+              />
+              <Line
+                yAxisId="tide"
+                type="monotone"
+                dataKey="tide"
+                name="Tide Height"
+                stroke="#60a5fa"
+                strokeWidth={2}
+                dot={false}
+                strokeDasharray="5 5"
+                opacity={0.6}
               />
 
             </ComposedChart>
