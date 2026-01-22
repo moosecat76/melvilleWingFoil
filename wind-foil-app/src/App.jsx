@@ -438,22 +438,34 @@ function App() {
               />
 
               {/* Day Separators - Vertical Grid Lines at Midnight */}
+              {/* Day Separators & Labels */}
               {chartData.map((d) => {
-                if (d.rawDate.getHours() === 0) {
+                const hour = d.rawDate.getHours();
+                // Vertical Line at Midnight
+                if (hour === 0) {
                   return (
                     <ReferenceLine
-                      key={d.time}
+                      key={`line-${d.time}`}
                       x={d.time}
                       stroke="var(--border-color)"
-                      strokeOpacity={0.8}
+                      strokeOpacity={0.5}
                       strokeDasharray="3 3"
+                    />
+                  );
+                }
+                // Label at Noon in the middle of the day slot
+                if (hour === 12) {
+                  return (
+                    <ReferenceLine
+                      key={`label-${d.time}`}
+                      x={d.time}
+                      stroke="none"
                       label={{
                         value: d.rawDate.toLocaleDateString('en-US', { weekday: 'long' }),
-                        position: 'insideTopRight',
+                        position: 'insideTop',
                         fill: 'var(--text-secondary)',
                         fontSize: 12,
                         fontWeight: 600,
-                        dy: 10 // Push label down slightly from top edge
                       }}
                     />
                   );
@@ -461,12 +473,19 @@ function App() {
                 return null;
               })}
 
-              {/* Ensure x matches a time exactly. 'current' comes from processed, which is in chartData. */}
-              {current && (
-                <ReferenceLine x={current.time} stroke="#ff4757" strokeDasharray="5 5" strokeWidth={3} isFront>
-                  <Label value="NOW" position="insideTop" offset={10} fill="#ff4757" fontSize={14} fontWeight="bold" />
-                </ReferenceLine>
-              )}
+              {/* NOW Indicator - Find closest chart time to current time/actuals */}
+              {(() => {
+                const nowTarget = current?.time ? new Date(current.time) : new Date();
+                const closest = chartData.reduce((prev, curr) =>
+                  Math.abs(curr.rawDate - nowTarget) < Math.abs(prev.rawDate - nowTarget) ? curr : prev
+                  , chartData[0]);
+
+                return closest ? (
+                  <ReferenceLine x={closest.time} stroke="#ff4757" strokeDasharray="5 5" strokeWidth={2} isFront>
+                    <Label value="NOW" position="insideTop" offset={25} fill="#ff4757" fontSize={12} fontWeight="bold" />
+                  </ReferenceLine>
+                ) : null;
+              })()}
 
               <Area
                 type="monotone"
