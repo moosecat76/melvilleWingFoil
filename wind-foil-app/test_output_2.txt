@@ -1,0 +1,77 @@
+
+[1m[46m RUN [49m[22m [36mv4.0.18 [39m[90mC:/Users/seang/Code/VSCode/MelvillWind/wind-foil-app[39m
+
+[90mstdout[2m | src/components/__tests__/DashboardChart.test.jsx[2m > [22m[2mDashboard Chart Markers[2m > [22m[2mrenders the "NOW" reference line
+[22m[39mChart Data Ready: [33m48[39m points
+
+[90mstderr[2m | src/components/__tests__/DashboardChart.test.jsx[2m > [22m[2mDashboard Chart Markers[2m > [22m[2mrenders the "NOW" reference line
+[22m[39mThe width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+
+[90mstdout[2m | src/components/__tests__/DashboardChart.test.jsx[2m > [22m[2mDashboard Chart Markers[2m > [22m[2mrenders the "NOW" reference line
+[22m[39mChart Data Ready: [33m48[39m points
+
+[90mstderr[2m | src/components/__tests__/DashboardChart.test.jsx[2m > [22m[2mDashboard Chart Markers[2m > [22m[2mrenders the "NOW" reference line
+[22m[39mThe width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+
+[90mstdout[2m | src/components/__tests__/DashboardChart.test.jsx[2m > [22m[2mDashboard Chart Markers[2m > [22m[2mrenders day separators aligned at midnight
+[22m[39mChart Data Ready: [33m48[39m points
+
+[90mstderr[2m | src/components/__tests__/DashboardChart.test.jsx[2m > [22m[2mDashboard Chart Markers[2m > [22m[2mrenders day separators aligned at midnight
+[22m[39mThe width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+
+[90mstdout[2m | src/components/__tests__/DashboardChart.test.jsx[2m > [22m[2mDashboard Chart Markers[2m > [22m[2mrenders day separators aligned at midnight
+[22m[39mChart Data Ready: [33m48[39m points
+
+[90mstderr[2m | src/components/__tests__/DashboardChart.test.jsx[2m > [22m[2mDashboard Chart Markers[2m > [22m[2mrenders day separators aligned at midnight
+[22m[39mThe width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+
+ [31m❯[39m src/components/__tests__/DashboardChart.test.jsx [2m([22m[2m2 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[33m 10132[2mms[22m[39m
+[31m     [31m×[31m renders the "NOW" reference line[39m[33m 5084[2mms[22m[39m
+[31m     [31m×[31m renders day separators aligned at midnight[39m[33m 5044[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 2 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/components/__tests__/DashboardChart.test.jsx[2m > [22mDashboard Chart Markers[2m > [22mrenders the "NOW" reference line
+[31m[1mError[22m: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".[39m
+[36m [2m❯[22m src/components/__tests__/DashboardChart.test.jsx:[2m91:5[22m[39m
+    [90m 89| [39m    })[33m;[39m
+    [90m 90| [39m
+    [90m 91| [39m    [34mit[39m([32m'renders the "NOW" reference line'[39m[33m,[39m [35masync[39m () [33m=>[39m {
+    [90m   | [39m    [31m^[39m
+    [90m 92| [39m        [34mrender[39m([33m<[39m[33mDashboard[39m [33m/[39m[33m>[39m)[33m;[39m
+    [90m 93| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/components/__tests__/DashboardChart.test.jsx[2m > [22mDashboard Chart Markers[2m > [22mrenders day separators aligned at midnight
+[31m[1mError[22m: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".[39m
+[36m [2m❯[22m src/components/__tests__/DashboardChart.test.jsx:[2m111:5[22m[39m
+    [90m109| [39m    })[33m;[39m
+    [90m110| [39m
+    [90m111| [39m    [34mit[39m([32m'renders day separators aligned at midnight'[39m[33m,[39m [35masync[39m () [33m=>[39m {
+    [90m   | [39m    [31m^[39m
+    [90m112| [39m        [34mrender[39m([33m<[39m[33mDashboard[39m [33m/[39m[33m>[39m)[33m;[39m
+    [90m113| [39m        await waitFor(() => expect(weatherService.processChartData).to…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m2 failed[39m[22m[90m (2)[39m
+[2m   Start at [22m 11:16:09
+[2m   Duration [22m 11.67s[2m (transform 263ms, setup 205ms, import 772ms, tests 10.13s, environment 362ms)[22m
+

@@ -1,4 +1,15 @@
-# React + Vite
+# Wind Foil App
+
+A React-based web application for Wing Foiling enthusiasts at Melville Waters (and beyond!).
+
+## Features Added
+- **Multi-Location Support**: Add and switch between different foiling spots.
+- **Best Time Suggestions**: AI-driven suggestions for the best time to go based on wind and gear.
+- **Session Journal**: Record your sessions, notes, and ratings.
+- **Architecture Ready**: Built with Authentication contexts ready for future Google Sign-In integration.
+
+## Getting Started
+To run go to wind-foil-app folder and run npm run dev
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 

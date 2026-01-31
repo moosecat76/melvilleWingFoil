@@ -16,10 +16,14 @@ let DefaultIcon = L.icon({
 
 L.Marker.prototype.options.icon = DefaultIcon;
 
-const MapComponent = ({ lat, lng }) => {
+const MapComponent = ({ lat, lng, name = "Launch Spot" }) => {
+    // We use a key on MapContainer to force re-initialization when coordinates change
+    const mapKey = `${lat}-${lng}`;
+
     return (
         <div style={{ height: '300px', width: '100%', borderRadius: '12px', overflow: 'hidden' }}>
             <MapContainer
+                key={mapKey}
                 center={[lat, lng]}
                 zoom={13}
                 style={{ height: '100%', width: '100%' }}
@@ -32,7 +36,7 @@ const MapComponent = ({ lat, lng }) => {
                 />
                 <Marker position={[lat, lng]}>
                     <Popup>
-                        Melville Waters<br /> Best for Wing Foiling!
+                        {name}<br /> Windsport Location
                     </Popup>
                 </Marker>
             </MapContainer>
