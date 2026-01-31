@@ -286,8 +286,6 @@ const Dashboard = () => {
 
                                 <XAxis
                                     dataKey="index"
-                                    type="number"
-                                    domain={[0, chartData.length - 1]}
                                     padding={{ left: 0, right: 0 }}
                                     stroke="var(--text-secondary)"
                                     fontSize={10}
@@ -407,21 +405,12 @@ const Dashboard = () => {
                                         Math.abs(curr.time - nowTs) < Math.abs(prev.time - nowTs) ? curr : prev
                                     );
 
-                                    console.log('Dashboard Debug:', {
-                                        nowTs,
-                                        closestIndex: closest.index,
-                                        firstTime: chartData[0]?.time,
-                                        lastTime: chartData[chartData.length - 1]?.time,
-                                        dataLength: chartData.length
-                                    });
-
                                     return (
                                         <ReferenceLine
                                             x={closest.index}
                                             stroke="#ef4444"
                                             strokeWidth={3}
                                             isFront={true}
-                                            ifOverflow="extend"
                                         >
                                             <Label
                                                 value="NOW"
