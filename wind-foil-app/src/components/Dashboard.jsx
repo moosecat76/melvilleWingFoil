@@ -268,164 +268,152 @@ const Dashboard = () => {
                 <Journal weatherData={data} />
 
                 {/* Main Chart */}
-                <div className="glass-panel" style={{ height: '650px', display: 'flex', flexDirection: 'column', overflow: 'visible' }}>
-                    <div style={{ padding: '2rem 2rem 0.5rem 2rem' }}>
-                        <h3 className="card-title">7-Day Forecast</h3>
-                    </div>
-                    <div style={{ flex: 1, width: '100%', minHeight: '450px', position: 'relative' }}>
-                        <ResponsiveContainer width="100%" height="100%" debounce={1}>
-                            <ComposedChart data={chartData} margin={{ top: 60, right: 30, left: 10, bottom: 20 }}>
-                                <defs>
-                                    <linearGradient id="colorSpeed" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="var(--accent-primary)" stopOpacity={0.3} />
-                                        <stop offset="95%" stopColor="var(--accent-primary)" stopOpacity={0} />
-                                    </linearGradient>
-                                </defs>
+                <div className="glass-panel" style={{ padding: '2rem', height: '400px' }}>
+                    <h3 className="card-title">7-Day Forecast (Arrows show direction)</h3>
+                    <ResponsiveContainer width="100%" height="100%">
+                        {/* Use chartData which has converted units */}
+                        <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                            <defs>
+                                <linearGradient id="colorSpeed" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="var(--accent-primary)" stopOpacity={0.3} />
+                                    <stop offset="95%" stopColor="var(--accent-primary)" stopOpacity={0} />
+                                </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" opacity={0.1} vertical={false} />
 
-                                <CartesianGrid strokeDasharray="3 3" opacity={0.1} vertical={false} />
+                            <XAxis
+                                dataKey="time"
+                                stroke="var(--text-secondary)"
+                                fontSize={12}
+                                tickMargin={10}
+                                minTickGap={60}
+                                tickFormatter={(val) => {
+                                    const d = new Date(val);
+                                    return format(d, 'EEE HH:mm');
+                                }}
+                            />
 
-                                <XAxis
-                                    dataKey="index"
-                                    padding={{ left: 0, right: 0 }}
-                                    stroke="var(--text-secondary)"
-                                    fontSize={10}
-                                    tickMargin={10}
-                                    ticks={chartData.filter(d => d.isDayStart || d.isNoon).map(d => d.index)}
-                                    tickFormatter={(idx) => {
-                                        const d = chartData[Math.round(idx)];
-                                        if (!d) return '';
-                                        if (d.isDayStart) return format(new Date(d.time), 'EEE dd');
-                                        return '12:00';
-                                    }}
-                                />
+                            <YAxis
+                                yAxisId="wind"
+                                stroke="var(--text-secondary)"
+                                fontSize={12}
+                                domain={[0, 'auto']}
+                                allowDecimals={false} // Force integers for clean scale
+                                label={{
+                                    value: `Speed (${unitLabel})`,
+                                    angle: -90,
+                                    position: 'insideLeft',
+                                    style: { textAnchor: 'middle', fill: 'var(--text-secondary)' }
+                                }}
+                            />
+                            <YAxis
+                                yAxisId="tide"
+                                orientation="right"
+                                stroke="var(--accent-primary)"
+                                fontSize={12}
+                                domain={['auto', 'auto']}
+                                hide={false}
+                                tickFormatter={(val) => `${val}m`}
+                            />
 
-                                <YAxis
-                                    yAxisId="wind"
-                                    width={45}
-                                    stroke="var(--text-secondary)"
-                                    fontSize={12}
-                                    allowDecimals={false}
-                                    label={{ value: `Wind (${unitLabel})`, angle: -90, position: 'insideLeft', offset: 0, style: { textAnchor: 'middle', fill: 'var(--text-secondary)', fontSize: 10 } }}
-                                />
-                                <YAxis
-                                    yAxisId="tide"
-                                    width={35}
-                                    orientation="right"
-                                    stroke="#60a5fa"
-                                    fontSize={12}
-                                    tickFormatter={(val) => `${val}m`}
-                                />
-
-                                <Tooltip
-                                    content={({ active, payload }) => {
-                                        if (active && payload && payload.length) {
-                                            const d = payload[0].payload;
-                                            return (
-                                                <div style={{ backgroundColor: 'rgba(15, 23, 42, 0.95)', border: '1px solid rgba(255,255,255,0.1)', padding: '12px', borderRadius: '12px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)' }}>
-                                                    <p style={{ color: 'var(--accent-primary)', marginBottom: '8px', fontWeight: 700, fontSize: '0.9rem' }}>{d.displayDate} {d.label}</p>
-                                                    <p style={{ color: '#fff', margin: 0, fontSize: '1.1rem' }}>Speed: <strong>{d.chartSpeed?.toFixed(1) || '-'}</strong> <span style={{ fontSize: '0.8rem', opacity: 0.7 }}>{unitLabel}</span></p>
-                                                    <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.9rem', margin: '4px 0 0' }}>Gusts: {d.chartGusts?.toFixed(1) || '-'} {unitLabel}</p>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', color: 'rgba(255,255,255,0.8)', fontSize: '0.9rem' }}>
-                                                        Direction: {d.direction}°
-                                                        <ArrowUp size={14} style={{ transform: `rotate(${d.direction + 180}deg)`, color: 'var(--accent-primary)' }} />
-                                                    </div>
-                                                    {d.tide != null && (
-                                                        <p style={{ color: '#60a5fa', margin: '8px 0 0', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '8px', fontSize: '0.9rem' }}>
-                                                            Tide: <strong>{d.tide.toFixed(2)}m</strong>
-                                                        </p>
-                                                    )}
+                            <Tooltip
+                                content={({ active, payload, label }) => {
+                                    if (active && payload && payload.length) {
+                                        const data = payload[0].payload;
+                                        return (
+                                            <div style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', padding: '10px', borderRadius: '8px' }}>
+                                                <p style={{ color: 'var(--accent-primary)', marginBottom: '5px', fontWeight: 600 }}>{data.displayDate} {data.label}</p>
+                                                <p style={{ color: 'var(--text-primary)', margin: 0 }}>
+                                                    Speed: <strong>{data.chartSpeed}</strong> {unitLabel}
+                                                </p>
+                                                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', margin: 0 }}>
+                                                    Gusts: {data.chartGusts} {unitLabel}
+                                                </p>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '5px', color: 'var(--text-secondary)' }}>
+                                                    Direction: {data.direction}°
+                                                    <ArrowUp size={14} style={{ transform: `rotate(${data.direction + 180}deg)` }} />
                                                 </div>
-                                            );
-                                        }
-                                        return null;
-                                    }}
-                                />
+                                            </div>
+                                        );
+                                    }
+                                    return null;
+                                }}
+                            />
 
-                                <Area
-                                    type="monotone"
-                                    dataKey="chartSpeed"
-                                    yAxisId="wind"
-                                    stroke="var(--accent-primary)"
-                                    fillOpacity={1}
-                                    fill="url(#colorSpeed)"
-                                    strokeWidth={3}
-                                    dot={<CustomArrowDot getWindRating={getWindRating} idealWindDirection={currentLocation.idealWindDirection} />}
-                                    isFront={false}
-                                />
-                                <Line
-                                    yAxisId="tide"
-                                    type="monotone"
-                                    dataKey="tide"
-                                    stroke="#60a5fa"
-                                    strokeWidth={2}
-                                    dot={false}
-                                    strokeDasharray="5 5"
-                                    opacity={0.6}
-                                />
-
-                                {/* --- CHART MARKERS (Native Recharts) --- */}
-
-                                {/* Midnight Separators */}
-                                {chartData.filter(d => d.isDayStart).map(d => (
-                                    <ReferenceLine
-                                        key={`sep-${d.index}`}
-                                        x={d.index}
-                                        stroke="rgba(255, 255, 255, 0.5)"
-                                        strokeWidth={1}
-                                        strokeDasharray="5 5"
-                                        isFront={true}
-                                    />
-                                ))}
-
-                                {/* Day Labels */}
-                                {chartData.filter(d => d.isNoon).map(d => (
-                                    <ReferenceLine
-                                        key={`label-${d.index}`}
-                                        x={d.index}
-                                        stroke="transparent"
-                                        isFront={true}
-                                    >
-                                        <Label
-                                            value={d.dayLabel.toUpperCase()}
-                                            position="top"
-                                            offset={25}
-                                            fill="#FFFFFF"
-                                            fontSize={12}
-                                            fontWeight={800}
-                                        />
-                                    </ReferenceLine>
-                                ))}
-
-                                {/* NOW Indicator */}
-                                {(() => {
-                                    const nowTs = Date.now();
-                                    if (!chartData || chartData.length === 0) return null;
-
-                                    const closest = chartData.reduce((prev, curr) =>
-                                        Math.abs(curr.time - nowTs) < Math.abs(prev.time - nowTs) ? curr : prev
-                                    );
-
+                            {/* Day Separators - Vertical Grid Lines at Midnight */}
+                            {/* Day Separators & Labels */}
+                            {chartData.map((d) => {
+                                const hour = d.rawDate.getHours();
+                                // Vertical Line at Midnight
+                                if (hour === 0) {
                                     return (
                                         <ReferenceLine
-                                            x={closest.index}
-                                            stroke="#ef4444"
-                                            strokeWidth={3}
-                                            isFront={true}
-                                        >
-                                            <Label
-                                                value="NOW"
-                                                position="top"
-                                                offset={25}
-                                                fill="#ef4444"
-                                                fontSize={12}
-                                                fontWeight="bold"
-                                            />
-                                        </ReferenceLine>
+                                            key={`line-${d.time}`}
+                                            x={d.time}
+                                            stroke="var(--border-color)"
+                                            strokeOpacity={0.5}
+                                            strokeDasharray="3 3"
+                                        />
                                     );
-                                })()}
-                            </ComposedChart>
-                        </ResponsiveContainer>
-                    </div>
+                                }
+                                // Label at Noon in the middle of the day slot
+                                if (hour === 12) {
+                                    return (
+                                        <ReferenceLine
+                                            key={`label-${d.time}`}
+                                            x={d.time}
+                                            stroke="none"
+                                            label={{
+                                                value: d.rawDate.toLocaleDateString('en-US', { weekday: 'long' }),
+                                                position: 'insideTop',
+                                                fill: 'var(--text-secondary)',
+                                                fontSize: 12,
+                                                fontWeight: 600,
+                                            }}
+                                        />
+                                    );
+                                }
+                                return null;
+                            })}
+
+                            {/* NOW Indicator - Find closest chart time to current time/actuals */}
+                            {(() => {
+                                const nowTarget = current?.time ? new Date(current.time) : new Date();
+                                const closest = chartData.reduce((prev, curr) =>
+                                    Math.abs(curr.rawDate - nowTarget) < Math.abs(prev.rawDate - nowTarget) ? curr : prev
+                                    , chartData[0]);
+
+                                return closest ? (
+                                    <ReferenceLine x={closest.time} stroke="#ff4757" strokeDasharray="5 5" strokeWidth={2} isFront>
+                                        <Label value="NOW" position="insideTop" offset={25} fill="#ff4757" fontSize={12} fontWeight="bold" />
+                                    </ReferenceLine>
+                                ) : null;
+                            })()}
+
+                            <Area
+                                type="monotone"
+                                dataKey="chartSpeed"
+                                name="speed"
+                                stroke="var(--accent-primary)"
+                                fillOpacity={1}
+                                fill="url(#colorSpeed)"
+                                strokeWidth={2}
+                                dot={<CustomArrowDot getWindRating={getWindRating} idealWindDirection={currentLocation.idealWindDirection} />}
+                            />
+                            <Line
+                                yAxisId="tide"
+                                type="monotone"
+                                dataKey="tide"
+                                name="Tide Height"
+                                stroke="#60a5fa"
+                                strokeWidth={2}
+                                dot={false}
+                                strokeDasharray="5 5"
+                                opacity={0.6}
+                            />
+
+                        </ComposedChart>
+                    </ResponsiveContainer>
                 </div>
 
                 <div className="glass-panel" style={{ padding: '2rem' }}>
