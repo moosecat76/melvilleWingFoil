@@ -25,6 +25,7 @@ export const getWeatherForecast = async (lat = DEFAULT_COORDS.latitude, lon = DE
                 timezone: 'auto',
                 past_days: 1,      // 24h history (approx)
                 forecast_days: 7,  // 7 days look ahead
+                daily: 'sunrise,sunset', // Request daylight info
             },
         });
         return response.data;

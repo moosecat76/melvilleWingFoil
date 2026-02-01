@@ -41,6 +41,7 @@ const Dashboard = () => {
     const { user } = useAuth(); // Placeholder for future auth
 
     const [data, setData] = useState([]);
+    const [daily, setDaily] = useState(null);
     const [current, setCurrent] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -71,6 +72,7 @@ const Dashboard = () => {
                 // Pass tideData to helper
                 const processed = processChartData(rawData, tideData);
                 setData(processed);
+                setDaily(rawData.daily);
 
                 if (actualWeather) {
                     const diffHours = Math.abs(new Date() - actualWeather.time) / 36e5;
@@ -161,6 +163,7 @@ const Dashboard = () => {
                         forecastHourly={data}
                         userGear={userGear}
                         idealWindDirection={currentLocation.idealWindDirection}
+                        daily={daily}
                     />
                 </div>
 
@@ -265,7 +268,15 @@ const Dashboard = () => {
                 </div>
 
                 {/* Feature 2: Journal */}
-                <Journal weatherData={data} />
+                <Journal
+                    weatherData={data}
+                    userGear={userGear}
+                    onAddGear={() => {
+                        setShowGearSelector(true);
+                        // Optional: Scroll to top or give visual feedback?
+                        // For now just opening the selector which is high up on the page.
+                    }}
+                />
 
                 {/* Main Chart */}
                 <div className="glass-panel" style={{ padding: '2rem', height: '400px' }}>

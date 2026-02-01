@@ -72,13 +72,37 @@ export const LocationProvider = ({ children }) => {
         }
     };
 
+    const updateLocation = (id, updates) => {
+        setLocations(prev => prev.map(loc => {
+            if (loc.id === id) {
+                const updated = {
+                    ...loc,
+                    ...updates,
+                    // Ensure nested structure is preserved/updated correctly if passed flat
+                    idealWindDirection: {
+                        min: parseFloat(updates.idealMin !== undefined ? updates.idealMin : loc.idealWindDirection.min),
+                        max: parseFloat(updates.idealMax !== undefined ? updates.idealMax : loc.idealWindDirection.max)
+                    }
+                };
+
+                // If it's the current location, update that state too
+                if (currentLocation.id === id) {
+                    setCurrentLocation(updated);
+                }
+                return updated;
+            }
+            return loc;
+        }));
+    };
+
     return (
         <LocationContext.Provider value={{
             locations,
             currentLocation,
             addLocation,
             switchLocation,
-            deleteLocation
+            deleteLocation,
+            updateLocation
         }}>
             {children}
         </LocationContext.Provider>

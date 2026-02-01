@@ -1,8 +1,11 @@
 
-export const getWindRating = (speedKmh, direction, idealRange = { min: 135, max: 270 }) => {
+export const getWindRating = (speedKmh, direction, idealRange) => {
+    // Default range if not provided or null
+    const safeIdealRange = idealRange || { min: 135, max: 270 };
+
     if (speedKmh == null) return { label: 'N/A', rating: 0, color: 'var(--text-secondary)' };
 
-    const isIdealDirection = direction >= idealRange.min && direction <= idealRange.max;
+    const isIdealDirection = direction >= safeIdealRange.min && direction <= safeIdealRange.max;
 
     if (speedKmh < 15) {
         return { label: 'Too Light', rating: 1, color: 'var(--text-secondary)' };
@@ -67,30 +70,118 @@ export const getGearRecommendation = (speedKmh, userGear = []) => {
     return { text: recText, sub: recSub };
 };
 
-export const suggestBestSessions = (hourlyForecast, userGear = [], idealRange) => {
-    if (!hourlyForecast || hourlyForecast.length === 0) return [];
+// Helper to average angles correctly
+const averageAngles = (angles) => {
+    if (!angles || angles.length === 0) return 0;
+    const sum = angles.reduce((acc, a) => {
+        const rad = a * Math.PI / 180;
+        return { sin: acc.sin + Math.sin(rad), cos: acc.cos + Math.cos(rad) };
+    }, { sin: 0, cos: 0 });
+    return (Math.atan2(sum.sin / angles.length, sum.cos / angles.length) * 180 / Math.PI + 360) % 360;
+};
 
-    // Filter next 24-48 hours
+export const getBestTimeBlocks = (hourlyForecast, userGear = [], idealRange, dailyData = null) => {
+    if (!hourlyForecast || !Array.isArray(hourlyForecast) || hourlyForecast.length === 0) return [];
+
+    // 1. Get Scored Candidates
     const candidates = hourlyForecast.filter(slot => {
+        if (!slot || !slot.time) return false;
         const date = new Date(slot.time);
         const now = new Date();
-        const hour = date.getHours();
-        // Only daylight hours (roughly 6am to 6pm for simplicity, or use sun data if available)
-        // Only future
-        return date > now && hour >= 6 && hour <= 18;
-    });
+        if (date <= now) return false;
 
-    const scored = candidates.map(slot => {
+        // Daylight Check
+        let isDaylight = false;
+
+        if (dailyData && dailyData.time && dailyData.sunrise && dailyData.sunset) {
+            const dateStr = date.toISOString().split('T')[0];
+            const dayIndex = dailyData.time.findIndex(t => t === dateStr);
+
+            if (dayIndex !== -1) {
+                const sunrise = new Date(dailyData.sunrise[dayIndex]);
+                const sunset = new Date(dailyData.sunset[dayIndex]);
+                // Buffer: 30 mins after sunrise, 30 mins before sunset for safety? or just strict.
+                // Let's go with strict sunrise-sunset for now.
+                isDaylight = date >= sunrise && date <= sunset;
+            } else {
+                // Fallback if day not found in daily (unlikely)
+                const hour = date.getHours();
+                isDaylight = hour >= 6 && hour <= 19;
+            }
+        } else {
+            // Fallback if no daily data passed
+            const hour = date.getHours();
+            isDaylight = hour >= 6 && hour <= 19;
+        }
+
+        return isDaylight;
+    }).map(slot => {
         const rating = getWindRating(slot.speed, slot.direction, idealRange);
-        return {
-            ...slot,
-            rating,
-            gear: getGearRecommendation(slot.speed, userGear)
-        };
+        return { ...slot, rating };
     });
 
-    // Return only ones with decent rating, sorted by stats
-    return scored
-        .filter(s => s.rating.rating >= 3)
-        .sort((a, b) => b.rating.rating - a.rating.rating); // Best first
+    // 2. Group into Blocks
+    const blocks = [];
+    let currentBlock = [];
+
+    candidates.forEach((slot) => {
+        if (!slot.rating) return;
+        const isGood = slot.rating.rating >= 3;
+
+        if (isGood) {
+            const prev = currentBlock.length > 0 ? currentBlock[currentBlock.length - 1] : null;
+            // Continuous if within 1.1 hours (allow slightly flexible scheduling slots)
+            const isContinuous = prev && (new Date(slot.time) - new Date(prev.time) <= 4000000);
+
+            if (currentBlock.length === 0 || isContinuous) {
+                currentBlock.push(slot);
+            } else {
+                blocks.push(currentBlock);
+                currentBlock = [slot];
+            }
+        } else {
+            if (currentBlock.length > 0) {
+                blocks.push(currentBlock);
+                currentBlock = [];
+            }
+        }
+    });
+    if (currentBlock.length > 0) blocks.push(currentBlock);
+
+    // 3. Aggregate Block Data
+    return blocks
+        .filter(block => block.length > 0)
+        .map(block => {
+            const avgSpeed = block.reduce((sum, s) => sum + (s.speed || 0), 0) / block.length;
+            const avgGusts = block.reduce((sum, s) => sum + (s.gusts || 0), 0) / block.length;
+            const maxGusts = Math.max(...block.map(s => s.gusts || 0));
+            const avgDirection = averageAngles(block.map(s => s.direction || 0));
+
+            // Average Rating value
+            const avgRatingVal = block.reduce((sum, s) => sum + s.rating.rating, 0) / block.length;
+
+            // Gear Rec based on avg speed
+            const gearRec = getGearRecommendation(avgSpeed, userGear);
+
+            // Overall rating label matches the average speed/direction
+            const overallRating = getWindRating(avgSpeed, avgDirection, idealRange);
+
+            return {
+                start: block[0].time,
+                end: new Date(new Date(block[block.length - 1].time).getTime() + 3600000).toISOString(),
+                durationHours: block.length,
+                avgSpeed,
+                avgGusts,
+                maxGusts,
+                avgDirection,
+                rating: overallRating,
+                gear: gearRec,
+                hourlyData: block
+            };
+        })
+        .sort((a, b) => b.rating.rating - a.rating.rating || a.start - b.start);
+};
+
+export const suggestBestSessions = (hourlyForecast, userGear = [], idealRange, dailyData = null) => {
+    return getBestTimeBlocks(hourlyForecast, userGear, idealRange, dailyData);
 };

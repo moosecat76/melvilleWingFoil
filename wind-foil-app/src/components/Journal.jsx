@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from '../context/LocationContext';
 import { getJournalEntries, addJournalEntry, deleteJournalEntry } from '../services/journalService';
-import { Book, Plus, Trash2, Calendar, Wind, Clock, MapPin } from 'lucide-react';
+import { Book, Plus, Trash2, Calendar, Wind, Clock, MapPin, X } from 'lucide-react';
 import { format } from 'date-fns';
 
-const Journal = ({ weatherData }) => {
+const Journal = ({ weatherData, userGear = [], onAddGear }) => {
     const { currentLocation } = useLocation();
     const [entries, setEntries] = useState([]);
     const [isAdding, setIsAdding] = useState(false);
@@ -21,6 +21,17 @@ const Journal = ({ weatherData }) => {
         windGusts: '',
         windDirection: ''
     });
+
+    const handleAddGearToEntry = (gearItem) => {
+        const gearString = `${gearItem.size}m ${gearItem.model}`;
+        setNewEntry(prev => {
+            const current = prev.gearUsed;
+            return {
+                ...prev,
+                gearUsed: current ? `${current}, ${gearString}` : gearString
+            };
+        });
+    };
 
     useEffect(() => {
         // Load all entries
@@ -146,12 +157,73 @@ const Journal = ({ weatherData }) => {
 
                     <div>
                         <label style={{ display: 'block', marginBottom: '4px', fontSize: '0.9rem' }}>Gear Used</label>
-                        <input
-                            value={newEntry.gearUsed}
-                            onChange={e => setNewEntry({ ...newEntry, gearUsed: e.target.value })}
-                            placeholder="e.g. 5m Wing, 85L Board"
-                            style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'transparent', color: 'inherit' }}
-                        />
+
+                        {/* Selected Gear Chips */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+                            {newEntry.gearUsed.split(', ').filter(g => g.trim() !== '').map((gearStr, idx) => (
+                                <div key={idx} style={{
+                                    background: 'var(--accent-primary)',
+                                    color: 'black',
+                                    padding: '4px 8px',
+                                    borderRadius: '16px',
+                                    fontSize: '0.8rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px'
+                                }}>
+                                    <span>{gearStr}</span>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const currentList = newEntry.gearUsed.split(', ').filter(g => g.trim() !== '');
+                                            const newList = currentList.filter((_, i) => i !== idx);
+                                            setNewEntry({ ...newEntry, gearUsed: newList.join(', ') });
+                                        }}
+                                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex' }}
+                                    >
+                                        <X size={14} color="black" />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Gear Dropdown & Add New */}
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            <select
+                                value=""
+                                onChange={(e) => {
+                                    if (e.target.value) {
+                                        handleAddGearToEntry(JSON.parse(e.target.value));
+                                    }
+                                }}
+                                style={{
+                                    flex: 1,
+                                    padding: '8px',
+                                    borderRadius: '4px',
+                                    border: '1px solid var(--border-color)',
+                                    background: 'var(--bg-secondary)',
+                                    color: 'white'
+                                }}
+                            >
+                                <option value="">Select Gear from Quiver...</option>
+                                {userGear.map(gear => (
+                                    <option key={gear.id} value={JSON.stringify(gear)}>
+                                        {gear.size}m {gear.model}
+                                    </option>
+                                ))}
+                            </select>
+
+                            <button
+                                type="button"
+                                onClick={onAddGear}
+                                style={{
+                                    background: 'none', border: '1px solid var(--accent-primary)',
+                                    color: 'var(--accent-primary)', padding: '0 12px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.9rem'
+                                }}
+                            >
+                                <Plus size={16} /> Add New
+                            </button>
+                        </div>
                     </div>
 
                     <div>
