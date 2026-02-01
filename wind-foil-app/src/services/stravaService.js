@@ -90,7 +90,24 @@ export const getActivities = async () => {
     return await response.json();
 };
 
+export const getActivityStreams = async (activityId) => {
+    const token = await getStravaToken();
+    if (!token) return null;
+
+    const keys = 'time,latlng,distance,altitude,velocity_smooth,grade_smooth';
+    const response = await fetch(`https://www.strava.com/api/v3/activities/${activityId}/streams?keys=${keys}&key_by_type=false`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+    return await response.json();
+};
+
 export const getStravaUser = () => {
     const stored = localStorage.getItem('strava_athlete');
-    return stored ? JSON.parse(stored) : null;
+    if (!stored || stored === 'undefined') return null;
+    try {
+        return JSON.parse(stored);
+    } catch (e) {
+        console.error('Failed to parse strava user:', e);
+        return null;
+    }
 };
