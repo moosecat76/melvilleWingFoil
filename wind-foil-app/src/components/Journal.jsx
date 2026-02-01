@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from '../context/LocationContext';
 import { getJournalEntries, addJournalEntry, deleteJournalEntry, updateJournalEntry } from '../services/journalService';
-import { Book, Plus, Trash2, Edit2, Calendar, Wind, Clock, MapPin, X } from 'lucide-react';
+import { Book, Plus, Trash2, Edit2, Calendar, Wind, Clock, MapPin, X, Activity } from 'lucide-react';
 import { format } from 'date-fns';
+import { getActivities, getStravaUser } from '../services/stravaService';
+import SessionMap from './SessionMap';
 
 const Journal = ({ weatherData, userGear = [], onAddGear }) => {
     const { currentLocation } = useLocation();
@@ -75,7 +77,9 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
             gearUsed: newEntry.gearUsed,
             windSpeed: newEntry.windSpeed,
             windGusts: newEntry.windGusts,
-            windDirection: newEntry.windDirection
+            windDirection: newEntry.windDirection,
+            stravaActivityId: newEntry.stravaActivityId,
+            mapPolyline: newEntry.mapPolyline
         };
 
         if (editId) {
@@ -91,7 +95,10 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
         // Reset
         setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '' });
         setIsAdding(false);
+        setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '', stravaActivityId: null, mapPolyline: null });
+        setIsAdding(false);
         setEditId(null);
+        setShowActivityPicker(false);
     };
 
     const handleEdit = (entry) => {
@@ -105,7 +112,9 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
             gearUsed: entry.gearUsed || '',
             windSpeed: entry.windSpeed || '',
             windGusts: entry.windGusts || '',
-            windDirection: entry.windDirection || ''
+            windDirection: entry.windDirection || '',
+            stravaActivityId: entry.stravaActivityId || null,
+            mapPolyline: entry.mapPolyline || null
         });
         setIsAdding(true);
     };
@@ -113,6 +122,40 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
     const handleDelete = (id) => {
         deleteJournalEntry(id);
         setEntries(entries.filter(e => e.id !== id));
+    };
+
+    const [stravaActivities, setStravaActivities] = useState([]);
+    const [showActivityPicker, setShowActivityPicker] = useState(false);
+
+    const fetchStravaActivities = async () => {
+        try {
+            const acts = await getActivities();
+            if (acts && acts.length > 0) {
+                setStravaActivities(acts);
+                setShowActivityPicker(true);
+            } else {
+                alert('No recent activities found or not connected.');
+            }
+        } catch (e) {
+            console.error(e);
+            alert('Failed to load Strava activities. Check connection.');
+        }
+    };
+
+    const handleSelectActivity = (activity) => {
+        const date = new Date(activity.start_date);
+
+        // Auto-fill from Strava
+        setLogDate(format(date, 'yyyy-MM-dd'));
+        setLogTime(format(date, 'HH:mm'));
+
+        setNewEntry(prev => ({
+            ...prev,
+            stravaActivityId: activity.id,
+            mapPolyline: activity.map?.summary_polyline,
+            notes: prev.notes || activity.name
+        }));
+        setShowActivityPicker(false);
     };
 
     return (
@@ -127,7 +170,9 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                         if (isAdding) {
                             setIsAdding(false);
                             setEditId(null);
-                            setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '' });
+                            setIsAdding(false);
+                            setEditId(null);
+                            setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '', stravaActivityId: null, mapPolyline: null });
                         } else {
                             setIsAdding(true);
                         }
@@ -141,6 +186,41 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
 
             {isAdding && (
                 <form onSubmit={handleAdd} style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '1.5rem', padding: '16px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
+                    {getStravaUser() && (
+                        <div style={{ marginBottom: '10px' }}>
+                            <button type="button" onClick={fetchStravaActivities} className="btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: '#fc4c02', color: 'white', border: 'none' }}>
+                                <Activity size={16} /> Link Recent Strava Activity
+                            </button>
+                            {showActivityPicker && (
+                                <div style={{ marginTop: '8px', background: 'var(--bg-secondary)', borderRadius: '4px', overflow: 'hidden' }}>
+                                    {stravaActivities.map(act => (
+                                        <div
+                                            key={act.id}
+                                            onClick={() => handleSelectActivity(act)}
+                                            style={{ padding: '8px', cursor: 'pointer', borderBottom: '1px solid var(--border-color)', fontSize: '0.85rem' }}
+                                        >
+                                            <div style={{ fontWeight: 600 }}>{act.name}</div>
+                                            <div style={{ color: 'var(--text-secondary)' }}>
+                                                {format(new Date(act.start_date), 'MMM d, HH:mm')} • {(act.distance / 1000).toFixed(2)}km
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            {newEntry.stravaActivityId && (
+                                <div style={{ marginTop: '10px' }}>
+                                    <div style={{ fontSize: '0.8rem', color: '#fc4c02', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '5px' }}>
+                                        <Activity size={14} /> Activity Linked
+                                        <button type="button" onClick={() => setNewEntry({ ...newEntry, stravaActivityId: null, mapPolyline: null })} style={{ background: 'none', border: 'none', cursor: 'pointer', marginLeft: 'auto' }}><X size={14} color="var(--text-secondary)" /></button>
+                                    </div>
+                                    {newEntry.mapPolyline && (
+                                        <SessionMap summary_polyline={newEntry.mapPolyline} />
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     <div style={{ display: 'flex', gap: '10px' }}>
                         <div style={{ flex: 1 }}>
                             <label style={{ display: 'block', marginBottom: '4px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Date</label>
@@ -321,6 +401,12 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
 
                             <p style={{ margin: '4px 0' }}>{entry.notes}</p>
                             {entry.gearUsed && <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: 0 }}>Gear: {entry.gearUsed}</p>}
+
+                            {/* Map Visualization */}
+                            {entry.mapPolyline && (
+                                <SessionMap summary_polyline={entry.mapPolyline} />
+                            )}
+
                             <div style={{ textAlign: 'right', marginTop: '4px' }}>
                                 <button
                                     onClick={() => handleEdit(entry)}

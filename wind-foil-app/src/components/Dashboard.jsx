@@ -12,6 +12,9 @@ import GearSelector from './GearSelector';
 import LocationManager from './LocationManager';
 import Journal from './Journal';
 import BestTime from './BestTime';
+import { exportData, importData } from '../services/storageService';
+import { initiateStravaAuth, handleStravaCallback, getStravaUser, getActivities } from '../services/stravaService';
+import { Download, Upload, Database, Activity } from 'lucide-react';
 
 const CustomArrowDot = (props) => {
     const { cx, cy, payload, index, getWindRating, idealWindDirection } = props;
@@ -99,7 +102,38 @@ const Dashboard = () => {
         };
 
         fetchData();
+        fetchData();
     }, [currentLocation]);
+
+    // Check for Strava Callback
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get('code');
+        if (code && !getStravaUser()) {
+            handleStravaCallback(code).then(() => {
+                // Remove code from URL
+                window.history.replaceState({}, document.title, "/");
+                alert('Strava Connected!');
+                // Force re-render or state update if needed
+                setLoading(false); // trigger update
+            }).catch(e => {
+                console.error(e);
+                alert('Failed to connect Strava');
+            });
+        }
+    }, []);
+
+    const handleImport = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            const result = await importData(file);
+            alert(`Successfully restored! Reloading...`);
+            window.location.reload();
+        } catch (err) {
+            alert('Failed to import data: ' + err.message);
+        }
+    };
 
     const formatSpeed = (val) => {
         if (val == null) return '-';
@@ -430,6 +464,43 @@ const Dashboard = () => {
                 <div className="glass-panel" style={{ padding: '2rem' }}>
                     <h3 className="card-title">Launch Location</h3>
                     <MapComponent lat={currentLocation.latitude} lng={currentLocation.longitude} name={currentLocation.name} />
+                </div>
+
+                {/* Data Management Section */}
+                <div className="glass-panel" style={{ padding: '2rem' }}>
+                    <h3 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Database size={20} /> Data & Settings
+                    </h3>
+                    <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '1rem' }}>
+                        <button onClick={exportData} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Download size={16} /> Export Data
+                        </button>
+                        <div style={{ position: 'relative' }}>
+                            <button className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }} onClick={() => document.getElementById('import-file').click()}>
+                                <Upload size={16} /> Import Data
+                            </button>
+                            <input
+                                id="import-file"
+                                type="file"
+                                accept=".json"
+                                onChange={handleImport}
+                                style={{ position: 'absolute', top: 0, left: 0, opacity: 0, width: '100%', height: '100%', cursor: 'pointer', display: 'none' }}
+                            />
+                        </div>
+
+                        <div style={{ width: '1px', background: 'var(--border-color)', margin: '0 10px' }}></div>
+
+                        {!getStravaUser() ? (
+                            <button onClick={initiateStravaAuth} style={{ background: '#fc4c02', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <Activity size={16} /> Connect Strava
+                            </button>
+                        ) : (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)' }}>
+                                <Activity size={16} color="#fc4c02" />
+                                <span>Connected as {getStravaUser().firstname}</span>
+                            </div>
+                        )}
+                    </div>
                 </div>
 
             </main >
