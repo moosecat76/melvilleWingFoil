@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from '../context/LocationContext';
-import { getJournalEntries, addJournalEntry, deleteJournalEntry } from '../services/journalService';
-import { Book, Plus, Trash2, Calendar, Wind, Clock, MapPin, X } from 'lucide-react';
+import { getJournalEntries, addJournalEntry, deleteJournalEntry, updateJournalEntry } from '../services/journalService';
+import { Book, Plus, Trash2, Edit2, Calendar, Wind, Clock, MapPin, X } from 'lucide-react';
 import { format } from 'date-fns';
 
 const Journal = ({ weatherData, userGear = [], onAddGear }) => {
     const { currentLocation } = useLocation();
     const [entries, setEntries] = useState([]);
     const [isAdding, setIsAdding] = useState(false);
+    const [editId, setEditId] = useState(null);
 
     // Form State
     const [logDate, setLogDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -23,7 +24,8 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
     });
 
     const handleAddGearToEntry = (gearItem) => {
-        const gearString = `${gearItem.size}m ${gearItem.model}`;
+        const unit = gearItem.type === 'board' ? 'L' : gearItem.type === 'foil' ? 'cm²' : 'm';
+        const gearString = `${gearItem.size}${unit} ${gearItem.model}`;
         setNewEntry(prev => {
             const current = prev.gearUsed;
             return {
@@ -40,7 +42,7 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
 
     // Smart Fill Logic
     useEffect(() => {
-        if (!isAdding || !weatherData || weatherData.length === 0) return;
+        if (!isAdding || editId || !weatherData || weatherData.length === 0) return;
 
         const target = new Date(`${logDate}T${logTime}`);
 
@@ -63,22 +65,49 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
 
     const handleAdd = (e) => {
         e.preventDefault();
-        const added = addJournalEntry({
+
+        const entryData = {
             locationId: currentLocation.id,
             locationName: currentLocation.name,
-            date: new Date(`${logDate}T${logTime}`).toISOString(), // Use selected time
+            date: new Date(`${logDate}T${logTime}`).toISOString(),
             notes: newEntry.notes,
             rating: parseInt(newEntry.rating),
             gearUsed: newEntry.gearUsed,
             windSpeed: newEntry.windSpeed,
             windGusts: newEntry.windGusts,
             windDirection: newEntry.windDirection
-        });
-        setEntries([added, ...entries]);
+        };
+
+        if (editId) {
+            const updated = updateJournalEntry({ ...entryData, id: editId });
+            if (updated) {
+                setEntries(entries.map(e => e.id === editId ? updated : e));
+            }
+        } else {
+            const added = addJournalEntry(entryData);
+            setEntries([added, ...entries]);
+        }
 
         // Reset
         setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '' });
         setIsAdding(false);
+        setEditId(null);
+    };
+
+    const handleEdit = (entry) => {
+        setEditId(entry.id);
+        const dateObj = new Date(entry.date);
+        setLogDate(format(dateObj, 'yyyy-MM-dd'));
+        setLogTime(format(dateObj, 'HH:mm'));
+        setNewEntry({
+            notes: entry.notes,
+            rating: entry.rating,
+            gearUsed: entry.gearUsed || '',
+            windSpeed: entry.windSpeed || '',
+            windGusts: entry.windGusts || '',
+            windDirection: entry.windDirection || ''
+        });
+        setIsAdding(true);
     };
 
     const handleDelete = (id) => {
@@ -94,7 +123,15 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                     Session Journal
                 </h3>
                 <button
-                    onClick={() => setIsAdding(!isAdding)}
+                    onClick={() => {
+                        if (isAdding) {
+                            setIsAdding(false);
+                            setEditId(null);
+                            setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '' });
+                        } else {
+                            setIsAdding(true);
+                        }
+                    }}
                     className="btn-secondary"
                     style={{ padding: '4px 8px', fontSize: '0.8rem' }}
                 >
@@ -208,7 +245,7 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                                 <option value="">Select Gear from Quiver...</option>
                                 {userGear.map(gear => (
                                     <option key={gear.id} value={JSON.stringify(gear)}>
-                                        {gear.size}m {gear.model}
+                                        [{gear.type || 'wing'}] {gear.size}{gear.type === 'board' ? 'L' : gear.type === 'foil' ? 'cm²' : 'm'} {gear.model}
                                     </option>
                                 ))}
                             </select>
@@ -246,7 +283,7 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                         />
                         <div style={{ textAlign: 'center' }}>{newEntry.rating} / 5</div>
                     </div>
-                    <button type="submit" className="btn-primary">Save Entry</button>
+                    <button type="submit" className="btn-primary">{editId ? 'Update Entry' : 'Save Entry'}</button>
                 </form>
             )}
 
@@ -285,6 +322,12 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                             <p style={{ margin: '4px 0' }}>{entry.notes}</p>
                             {entry.gearUsed && <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: 0 }}>Gear: {entry.gearUsed}</p>}
                             <div style={{ textAlign: 'right', marginTop: '4px' }}>
+                                <button
+                                    onClick={() => handleEdit(entry)}
+                                    style={{ background: 'transparent', border: 'none', color: 'var(--accent-primary)', cursor: 'pointer', fontSize: '0.8rem', marginRight: '10px' }}
+                                >
+                                    Edit
+                                </button>
                                 <button
                                     onClick={() => handleDelete(entry.id)}
                                     style={{ background: 'transparent', border: 'none', color: '#ff6b6b', cursor: 'pointer', fontSize: '0.8rem' }}

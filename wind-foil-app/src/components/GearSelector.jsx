@@ -36,8 +36,15 @@ const GearSelector = ({ currentGear, onSave, onClose }) => {
                 {items.length === 0 && <p style={{ color: 'var(--text-secondary)', fontStyle: 'italic' }}>No gear added yet.</p>}
                 {items.map(item => (
                     <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', background: 'var(--bg-secondary)', marginBottom: '0.5rem', borderRadius: '4px' }}>
-                        <span>
-                            <span style={{ fontWeight: 600, color: 'var(--accent-primary)' }}>{item.size}m</span> {item.model}
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '0.7em', textTransform: 'uppercase', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', padding: '1px 4px', borderRadius: '2px', minWidth: '40px', textAlign: 'center' }}>
+                                {item.type || 'wing'}
+                            </span>
+                            <span>
+                                <span style={{ fontWeight: 600, color: 'var(--accent-primary)' }}>
+                                    {item.size}{item.type === 'board' ? 'L' : item.type === 'foil' ? 'cm²' : 'm'}
+                                </span> {item.model}
+                            </span>
                         </span>
                         <button onClick={() => handleDelete(item.id)} style={{ background: 'none', border: 'none', color: '#ff4757', cursor: 'pointer' }}>
                             <Trash2 size={16} />
@@ -47,11 +54,20 @@ const GearSelector = ({ currentGear, onSave, onClose }) => {
             </div>
 
             {/* Add New */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr auto', gap: '0.5rem', alignItems: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr auto', gap: '0.5rem', alignItems: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+                <select
+                    value={newItem.type}
+                    onChange={e => setNewItem({ ...newItem, type: e.target.value })}
+                    style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'white', padding: '0.5rem', borderRadius: '4px', width: '100%' }}
+                >
+                    <option value="wing">Wing</option>
+                    <option value="foil">Foil</option>
+                    <option value="board">Board</option>
+                </select>
                 <input
                     type="number"
-                    placeholder="Size"
-                    step="0.1"
+                    placeholder={newItem.type === 'board' ? 'Vol (L)' : newItem.type === 'foil' ? 'Area (cm²)' : 'Size (m²)'}
+                    step={newItem.type === 'wing' ? '0.1' : '1'}
                     value={newItem.size}
                     onChange={e => setNewItem({ ...newItem, size: e.target.value })}
                     style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'white', padding: '0.5rem', borderRadius: '4px', width: '100%' }}

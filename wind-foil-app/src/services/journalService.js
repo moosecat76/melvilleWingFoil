@@ -23,6 +23,17 @@ export const deleteJournalEntry = (id) => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedEntries));
 };
 
+export const updateJournalEntry = (updatedEntry) => {
+    const entries = getJournalEntries();
+    const index = entries.findIndex(e => e.id === updatedEntry.id);
+    if (index !== -1) {
+        entries[index] = updatedEntry;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+        return updatedEntry;
+    }
+    return null;
+};
+
 export const getEntriesForLocation = (locationId) => {
     const entries = getJournalEntries();
     return entries.filter(e => e.locationId === locationId);
