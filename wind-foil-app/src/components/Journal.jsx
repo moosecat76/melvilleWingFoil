@@ -6,6 +6,78 @@ import { format } from 'date-fns';
 import { getActivities, getStravaUser, getActivityStreams } from '../services/stravaService';
 import SessionMap from './SessionMap';
 
+// Helper to calculate statistics
+const calculateActivityStats = (streams, maxSpeedMs = 0, distanceMeters = 0) => {
+    const speedKts = maxSpeedMs * 1.94384;
+    const distanceKm = distanceMeters / 1000;
+
+    let timeOnFoilMinutes = 0;
+
+    if (streams) {
+        let velocityStream, altitudeStream, gradeStream;
+
+        if (Array.isArray(streams)) {
+            velocityStream = streams.find(s => s.type === 'velocity_smooth')?.data;
+            altitudeStream = streams.find(s => s.type === 'altitude')?.data;
+            gradeStream = streams.find(s => s.type === 'grade_smooth')?.data;
+        } else if (typeof streams === 'object') {
+            velocityStream = streams.velocity_smooth?.data;
+            altitudeStream = streams.altitude?.data;
+            gradeStream = streams.grade_smooth?.data;
+        }
+
+        if (velocityStream && altitudeStream) {
+            let isOnFoil = false;
+            let foilSeconds = 0;
+
+            // Constants - Data Driven
+            const FOIL_SPEED_MIN_MS = 4.5;
+            const OFF_FOIL_SPEED_MAX_MS = 4.0;
+            const FOIL_ALT_MIN = 3.1;
+            const FOIL_ALT_MAX = 3.9;
+            const BASELINE_ALT_THRESHOLD = 4.0; // Resting baseline is ~4.2m
+            const DROP_SPEED_THRESHOLD = 1.5;
+
+            for (let i = 1; i < velocityStream.length; i++) {
+                const speed = velocityStream[i];
+                const alt = altitudeStream[i];
+                const prevSpeed = velocityStream[i - 1];
+                const speedDrop = prevSpeed - speed;
+
+                if (!isOnFoil) {
+                    // Rule 1: Enter "On Foil"
+                    if (speed > FOIL_SPEED_MIN_MS && alt >= FOIL_ALT_MIN && alt <= FOIL_ALT_MAX) {
+                        isOnFoil = true;
+                    }
+                } else {
+                    // Rule 2 & 3: Exit "Off Foil"
+                    const isLowSpeed = speed < OFF_FOIL_SPEED_MAX_MS;
+                    const isBackToBaseline = alt > BASELINE_ALT_THRESHOLD; // > 4.0m
+
+                    // Touchdown: Sudden speed loss + Altitude exiting flight window (> 3.9m)
+                    const isSuddenDrag = speedDrop > DROP_SPEED_THRESHOLD && alt > FOIL_ALT_MAX;
+
+                    if (isLowSpeed || isBackToBaseline || isSuddenDrag) {
+                        isOnFoil = false;
+                    }
+                }
+
+                if (isOnFoil) foilSeconds++;
+            }
+            timeOnFoilMinutes = foilSeconds / 60;
+        } else if (velocityStream) {
+            const count = velocityStream.filter(v => (v * 1.94384) > 8).length;
+            timeOnFoilMinutes = count / 60;
+        }
+    }
+
+    return {
+        topSpeed: speedKts,
+        distance: distanceKm,
+        timeOnFoil: timeOnFoilMinutes
+    };
+};
+
 const Journal = ({ weatherData, userGear = [], onAddGear }) => {
     const { currentLocation } = useLocation();
     const [entries, setEntries] = useState([]);
@@ -162,27 +234,7 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
         }
 
         // Calculate Stats
-        const speedKts = (activity.max_speed || 0) * 1.94384;
-        const distanceKm = (activity.distance || 0) / 1000;
-
-        // Calculate Time on Foil (> 8 kts)
-        let timeOnFoilMinutes = 0;
-        if (streams) {
-            let velocityStream;
-            // Handle both object and array format for streams
-            if (Array.isArray(streams)) {
-                velocityStream = streams.find(s => s.type === 'velocity_smooth')?.data;
-            } else if (typeof streams === 'object') {
-                velocityStream = streams.velocity_smooth?.data;
-            }
-
-            if (velocityStream) {
-                // Assume 1 second per point (standard for high res streams, but can be variable. 
-                // For now, simple count is a decent approximation for "Moving Time" streams)
-                const count = velocityStream.filter(v => (v * 1.94384) > 8).length;
-                timeOnFoilMinutes = count / 60;
-            }
-        }
+        const stats = calculateActivityStats(streams, activity.max_speed, activity.distance);
 
         setNewEntry(prev => ({
             ...prev,
@@ -190,11 +242,7 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
             mapPolyline: activity.map?.summary_polyline,
             streams: streams,
             notes: prev.notes || activity.name,
-            activityStats: {
-                topSpeed: speedKts,
-                distance: distanceKm,
-                timeOnFoil: timeOnFoilMinutes
-            }
+            activityStats: stats
         }));
         setShowActivityPicker(false);
     };
@@ -530,9 +578,48 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                             <p style={{ margin: '4px 0' }}>{entry.notes}</p>
                             {entry.gearUsed && <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: 0 }}>Gear: {entry.gearUsed}</p>}
 
-                            {/* Map Visualization */}
+                            {/* Map Visualization & Stats */}
                             {entry.mapPolyline && (
-                                <SessionMap summary_polyline={entry.mapPolyline} streams={entry.streams} />
+                                <>
+                                    <SessionMap summary_polyline={entry.mapPolyline} streams={entry.streams} />
+
+                                    {(() => {
+                                        // dynamic recalc to ensure new rules apply immediately
+                                        const calculated = entry.streams ? calculateActivityStats(entry.streams) : null;
+                                        const saved = entry.activityStats;
+
+                                        const stats = {
+                                            topSpeed: saved?.topSpeed ?? calculated?.topSpeed,
+                                            distance: saved?.distance ?? calculated?.distance,
+                                            timeOnFoil: calculated?.timeOnFoil ?? saved?.timeOnFoil
+                                        };
+
+                                        if (!stats.topSpeed && !stats.distance && !stats.timeOnFoil) return null;
+
+                                        return (
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginTop: '12px' }}>
+                                                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
+                                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Top Speed</div>
+                                                    <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--accent-primary)' }}>
+                                                        {stats.topSpeed ? parseFloat(stats.topSpeed).toFixed(1) : '–'} <span style={{ fontSize: '0.8rem' }}>kts</span>
+                                                    </div>
+                                                </div>
+                                                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
+                                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Distance</div>
+                                                    <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'white' }}>
+                                                        {stats.distance ? parseFloat(stats.distance).toFixed(2) : '–'} <span style={{ fontSize: '0.8rem' }}>km</span>
+                                                    </div>
+                                                </div>
+                                                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
+                                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Foil Time</div>
+                                                    <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#5cb85c' }}>
+                                                        {stats.timeOnFoil ? Math.round(stats.timeOnFoil) : '–'} <span style={{ fontSize: '0.8rem' }}>min</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+                                </>
                             )}
 
                             <div style={{ textAlign: 'right', marginTop: '4px' }}>
