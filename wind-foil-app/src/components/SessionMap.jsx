@@ -104,37 +104,27 @@ const SessionMap = ({ polyline, summary_polyline, streams }) => {
             return renderSimpleMap();
         }
 
-        // Buckets for different speed ranges (User Requested: <2, 2-3, 3-4, 5-7, 10-15, 15-20, >20)
-        // We will fill gaps (4-5, 7-10) with intermediate or extended ranges to ensure continuity.
+        // Buckets based on user request (<1: stopped, 1-2: crawl, 2-3: planing, 3-5: foil, 5+: cranking)
+        // Using m/s for thresholds as requested (1 m/s ≈ 2 kts)
         const buckets = {
-            stopped: [], // < 2
-            crawl: [],   // 2-3
-            slow: [],    // 3-4
-            gap1: [],    // 4-5 (Gap filler)
-            takeoff: [], // 5-7
-            gap2: [],    // 7-10 (Gap filler)
-            planing: [], // 10-15
-            fast: [],    // 15-20
-            turbo: []    // > 20
+            stopped: [],  // < 1 m/s
+            crawl: [],    // 1-2 m/s
+            planing: [],  // 2-3 m/s
+            foil: [],     // 3-5 m/s
+            cranking: []  // > 5 m/s
         };
 
         for (let i = 1; i < latlngStream.length; i++) {
             const p1 = latlngStream[i - 1];
             const p2 = latlngStream[i];
             const speedMs = (velocityStream[i - 1] + velocityStream[i]) / 2;
-            const speedKts = speedMs * 1.94384;
-
             const segment = [p1, p2];
 
-            if (speedKts < 2) buckets.stopped.push(segment);
-            else if (speedKts < 3) buckets.crawl.push(segment);
-            else if (speedKts < 4) buckets.slow.push(segment);
-            else if (speedKts < 5) buckets.gap1.push(segment); // 4-5 range
-            else if (speedKts < 7) buckets.takeoff.push(segment);
-            else if (speedKts < 10) buckets.gap2.push(segment); // 7-10 range
-            else if (speedKts < 15) buckets.planing.push(segment);
-            else if (speedKts < 20) buckets.fast.push(segment);
-            else buckets.turbo.push(segment);
+            if (speedMs < 1) buckets.stopped.push(segment);
+            else if (speedMs < 2) buckets.crawl.push(segment);
+            else if (speedMs < 3) buckets.planing.push(segment);
+            else if (speedMs < 5) buckets.foil.push(segment);
+            else buckets.cranking.push(segment);
         }
 
         const start = latlngStream[0];
@@ -151,30 +141,25 @@ const SessionMap = ({ polyline, summary_polyline, streams }) => {
                         url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
                     />
 
-                    {/* Render Buckets with Colors */}
-                    <Polyline positions={buckets.stopped} pathOptions={{ color: '#7f8c8d', weight: 3, opacity: 0.6 }} /> {/* Grey */}
-                    <Polyline positions={buckets.crawl} pathOptions={{ color: '#c0392b', weight: 4 }} />   {/* Deep Red */}
-                    <Polyline positions={buckets.slow} pathOptions={{ color: '#e74c3c', weight: 4 }} />    {/* Red */}
-                    <Polyline positions={buckets.gap1} pathOptions={{ color: '#d35400', weight: 4 }} />   {/* Dk Orange (4-5) */}
-                    <Polyline positions={buckets.takeoff} pathOptions={{ color: '#f39c12', weight: 4 }} /> {/* Orange */}
-                    <Polyline positions={buckets.gap2} pathOptions={{ color: '#f1c40f', weight: 4 }} />    {/* Yellow (7-10) */}
-                    <Polyline positions={buckets.planing} pathOptions={{ color: '#2ecc71', weight: 4 }} /> {/* Green */}
-                    <Polyline positions={buckets.fast} pathOptions={{ color: '#3498db', weight: 4 }} />    {/* Blue */}
-                    <Polyline positions={buckets.turbo} pathOptions={{ color: '#9b59b6', weight: 4 }} />   {/* Purple */}
+                    {/* Render Buckets with Colors (matching CSS tokens) */}
+                    <Polyline positions={buckets.stopped} pathOptions={{ color: '#94a3b8', weight: 3, opacity: 0.6 }} /> {/* Slate 400 */}
+                    <Polyline positions={buckets.crawl} pathOptions={{ color: '#f87171', weight: 4 }} />   {/* Red 400 */}
+                    <Polyline positions={buckets.planing} pathOptions={{ color: '#fbbf24', weight: 4 }} /> {/* Amber 400 */}
+                    <Polyline positions={buckets.foil} pathOptions={{ color: '#4ade80', weight: 5 }} />    {/* Green 400 */}
+                    <Polyline positions={buckets.cranking} pathOptions={{ color: '#818cf8', weight: 5 }} /> {/* Indigo 400 */}
 
                     <Marker position={start}><Popup>Start</Popup></Marker>
                     <Marker position={end}><Popup>End</Popup></Marker>
 
                     {/* Legend Overlay */}
                     <div className="leaflet-bottom leaflet-right" style={{ pointerEvents: 'none', margin: '10px', marginBottom: '20px' }}>
-                        <div className="leaflet-control" style={{ background: 'rgba(0,0,0,0.8)', padding: '8px', borderRadius: '4px', color: 'white', fontSize: '0.75rem', pointerEvents: 'auto', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ display: 'block', width: '10px', height: '10px', background: '#7f8c8d' }}></span> &lt; 2</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ display: 'block', width: '10px', height: '10px', background: '#c0392b' }}></span> 2-3</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ display: 'block', width: '10px', height: '10px', background: '#e74c3c' }}></span> 3-4</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ display: 'block', width: '10px', height: '10px', background: '#f39c12' }}></span> 5-7</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ display: 'block', width: '10px', height: '10px', background: '#2ecc71' }}></span> 10-15</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ display: 'block', width: '10px', height: '10px', background: '#3498db' }}></span> 15-20</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ display: 'block', width: '10px', height: '10px', background: '#9b59b6' }}></span> &gt; 20</div>
+                        <div className="leaflet-control" style={{ background: 'rgba(15, 23, 42, 0.9)', padding: '10px', borderRadius: '8px', color: '#f8fafc', fontSize: '0.75rem', pointerEvents: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', border: '1px solid rgba(148, 163, 184, 0.2)', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.3)' }}>
+                            <div style={{ fontWeight: 'bold', marginBottom: '2px', borderBottom: '1px solid rgba(148, 163, 184, 0.2)', paddingBottom: '2px', color: '#38bdf8' }}>Speed (m/s)</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#94a3b8', borderRadius: '2px' }}></span> &lt; 1 (Stopped)</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#f87171', borderRadius: '2px' }}></span> 1 - 2 (Crawl)</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#fbbf24', borderRadius: '2px' }}></span> 2 - 3 (Planing)</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#4ade80', borderRadius: '2px' }}></span> 3 - 5 (Foil)</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#818cf8', borderRadius: '2px' }}></span> 5+ (Cranking)</div>
                         </div>
                     </div>
                 </MapContainer>
