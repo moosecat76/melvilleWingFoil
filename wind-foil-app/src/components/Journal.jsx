@@ -5,77 +5,16 @@ import { Book, Plus, Trash2, Edit2, Calendar, Wind, Clock, MapPin, X, Activity }
 import { format } from 'date-fns';
 import { getActivities, getStravaUser, getActivityStreams } from '../services/stravaService';
 import SessionMap from './SessionMap';
+import { analyzeSession } from '../services/foilAnalysisService';
+import FoilAnalysisChart from './FoilAnalysisChart';
 
-// Helper to calculate statistics
-const calculateActivityStats = (streams, maxSpeedMs = 0, distanceMeters = 0) => {
+// Helper to calculate statistics (Legacy wrapper for backward compatibility or simple quick stats)
+const legacyCalculateStats = (streams, maxSpeedMs = 0, distanceMeters = 0) => {
     const speedKts = maxSpeedMs * 1.94384;
     const distanceKm = distanceMeters / 1000;
 
-    let timeOnFoilMinutes = 0;
-
-    if (streams) {
-        let velocityStream, altitudeStream, gradeStream;
-
-        if (Array.isArray(streams)) {
-            velocityStream = streams.find(s => s.type === 'velocity_smooth')?.data;
-            altitudeStream = streams.find(s => s.type === 'altitude')?.data;
-            gradeStream = streams.find(s => s.type === 'grade_smooth')?.data;
-        } else if (typeof streams === 'object') {
-            velocityStream = streams.velocity_smooth?.data;
-            altitudeStream = streams.altitude?.data;
-            gradeStream = streams.grade_smooth?.data;
-        }
-
-        if (velocityStream && altitudeStream) {
-            let isOnFoil = false;
-            let foilSeconds = 0;
-
-            // Constants - Data Driven
-            const FOIL_SPEED_MIN_MS = 4.5;
-            const OFF_FOIL_SPEED_MAX_MS = 4.0;
-            const FOIL_ALT_MIN = 3.1;
-            const FOIL_ALT_MAX = 3.9;
-            const BASELINE_ALT_THRESHOLD = 4.0; // Resting baseline is ~4.2m
-            const DROP_SPEED_THRESHOLD = 1.5;
-
-            for (let i = 1; i < velocityStream.length; i++) {
-                const speed = velocityStream[i];
-                const alt = altitudeStream[i];
-                const prevSpeed = velocityStream[i - 1];
-                const speedDrop = prevSpeed - speed;
-
-                if (!isOnFoil) {
-                    // Rule 1: Enter "On Foil"
-                    if (speed > FOIL_SPEED_MIN_MS && alt >= FOIL_ALT_MIN && alt <= FOIL_ALT_MAX) {
-                        isOnFoil = true;
-                    }
-                } else {
-                    // Rule 2 & 3: Exit "Off Foil"
-                    const isLowSpeed = speed < OFF_FOIL_SPEED_MAX_MS;
-                    const isBackToBaseline = alt > BASELINE_ALT_THRESHOLD; // > 4.0m
-
-                    // Touchdown: Sudden speed loss + Altitude exiting flight window (> 3.9m)
-                    const isSuddenDrag = speedDrop > DROP_SPEED_THRESHOLD && alt > FOIL_ALT_MAX;
-
-                    if (isLowSpeed || isBackToBaseline || isSuddenDrag) {
-                        isOnFoil = false;
-                    }
-                }
-
-                if (isOnFoil) foilSeconds++;
-            }
-            timeOnFoilMinutes = foilSeconds / 60;
-        } else if (velocityStream) {
-            const count = velocityStream.filter(v => (v * 1.94384) > 8).length;
-            timeOnFoilMinutes = count / 60;
-        }
-    }
-
-    return {
-        topSpeed: speedKts,
-        distance: distanceKm,
-        timeOnFoil: timeOnFoilMinutes
-    };
+    // Default fallback
+    return { topSpeed: speedKts, distance: distanceKm };
 };
 
 const Journal = ({ weatherData, userGear = [], onAddGear }) => {
@@ -96,7 +35,8 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
         windSpeed: '',
         windGusts: '',
         windDirection: '',
-        activityStats: null
+        activityStats: null,
+        foilAnalysis: null
     });
 
     const handleAddGearToEntry = (gearItem) => {
@@ -155,7 +95,8 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
             stravaActivityId: newEntry.stravaActivityId,
             mapPolyline: newEntry.mapPolyline,
             streams: newEntry.streams,
-            activityStats: newEntry.activityStats
+            activityStats: newEntry.activityStats,
+            foilAnalysis: newEntry.foilAnalysis
         };
 
         if (editId) {
@@ -169,7 +110,7 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
         }
 
         // Reset
-        setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '', stravaActivityId: null, mapPolyline: null, activityStats: null });
+        setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '', stravaActivityId: null, mapPolyline: null, activityStats: null, foilAnalysis: null });
         setIsAdding(false);
         setEditId(null);
         setShowActivityPicker(false);
@@ -190,7 +131,8 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
             stravaActivityId: entry.stravaActivityId || null,
             mapPolyline: entry.mapPolyline || null,
             streams: entry.streams || null,
-            activityStats: entry.activityStats || null
+            activityStats: entry.activityStats || null,
+            foilAnalysis: entry.foilAnalysis || null
         });
         setIsAdding(true);
     };
@@ -234,7 +176,9 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
         }
 
         // Calculate Stats
-        const stats = calculateActivityStats(streams, activity.max_speed, activity.distance);
+        const basicStats = legacyCalculateStats(streams, activity.max_speed, activity.distance);
+        // Run Full Analysis
+        const analysis = analyzeSession(streams);
 
         setNewEntry(prev => ({
             ...prev,
@@ -242,7 +186,8 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
             mapPolyline: activity.map?.summary_polyline,
             streams: streams,
             notes: prev.notes || activity.name,
-            activityStats: stats
+            activityStats: basicStats,
+            foilAnalysis: analysis
         }));
         setShowActivityPicker(false);
     };
@@ -498,8 +443,43 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                                                 </div>
                                             )}
 
-                                            {/* Activity Stats Display */}
-                                            {newEntry.activityStats && (
+                                            {/* Advanced Analysis Chart */}
+                                            {newEntry.foilAnalysis && (
+                                                <div style={{ marginTop: '20px' }}>
+                                                    <FoilAnalysisChart analysisData={newEntry.foilAnalysis} />
+
+                                                    {/* New Stats Grid */}
+                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '8px', marginTop: '12px' }}>
+                                                        <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
+                                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Foil Time</div>
+                                                            <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#5cb85c' }}>
+                                                                {newEntry.foilAnalysis.stats.totalFoilTime}m
+                                                            </div>
+                                                        </div>
+                                                        <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
+                                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Flights</div>
+                                                            <div style={{ fontSize: '1rem', fontWeight: 'bold', color: 'white' }}>
+                                                                {newEntry.foilAnalysis.stats.numberOfFlights}
+                                                            </div>
+                                                        </div>
+                                                        <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
+                                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>% Foil</div>
+                                                            <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#38bdf8' }}>
+                                                                {newEntry.foilAnalysis.stats.percentFoil}%
+                                                            </div>
+                                                        </div>
+                                                        <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
+                                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Runs</div>
+                                                            <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#facc15' }}>
+                                                                {newEntry.foilAnalysis.stats.totalRuns}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Fallback to simple stats if no advanced analysis but basic stats exist */}
+                                            {newEntry.activityStats && !newEntry.foilAnalysis && (
                                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginTop: '12px' }}>
                                                     <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
                                                         <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Top Speed</div>
@@ -511,12 +491,6 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                                                         <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Distance</div>
                                                         <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'white' }}>
                                                             {newEntry.activityStats.distance ? parseFloat(newEntry.activityStats.distance).toFixed(2) : '–'} <span style={{ fontSize: '0.8rem' }}>km</span>
-                                                        </div>
-                                                    </div>
-                                                    <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
-                                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Foil Time</div>
-                                                        <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#5cb85c' }}>
-                                                            {newEntry.activityStats.timeOnFoil ? Math.round(newEntry.activityStats.timeOnFoil) : '–'} <span style={{ fontSize: '0.8rem' }}>min</span>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -584,20 +558,29 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                                     <SessionMap summary_polyline={entry.mapPolyline} streams={entry.streams} />
 
                                     {(() => {
-                                        // dynamic recalc to ensure new rules apply immediately
-                                        const calculated = entry.streams ? calculateActivityStats(entry.streams) : null;
-                                        const saved = entry.activityStats;
+                                        // On-demand analysis for existing entries that might not have it saved yet
+                                        let analysis = entry.foilAnalysis;
+                                        if (!analysis && entry.streams) {
+                                            analysis = analyzeSession(entry.streams);
+                                        }
 
-                                        const stats = {
-                                            topSpeed: saved?.topSpeed ?? calculated?.topSpeed,
-                                            distance: saved?.distance ?? calculated?.distance,
-                                            timeOnFoil: calculated?.timeOnFoil ?? saved?.timeOnFoil
-                                        };
+                                        if (analysis) {
+                                            return (
+                                                <div style={{ marginTop: '10px' }}>
+                                                    <FoilAnalysisChart analysisData={analysis} />
+                                                    <div style={{ display: 'flex', gap: '10px', marginTop: '8px', fontSize: '0.85rem' }}>
+                                                        <span style={{ color: '#5cb85c' }}><b>{analysis.stats.totalFoilTime}m</b> Foil</span>
+                                                        <span style={{ color: '#38bdf8' }}><b>{analysis.stats.percentFoil}%</b> Eff.</span>
+                                                        <span style={{ color: '#facc15' }}><b>{analysis.stats.totalRuns}</b> Runs</span>
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
 
-                                        if (!stats.topSpeed && !stats.distance && !stats.timeOnFoil) return null;
-
+                                        // Fallback legacy stats
+                                        const stats = entry.activityStats || {};
                                         return (
-                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginTop: '12px' }}>
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '12px' }}>
                                                 <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
                                                     <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Top Speed</div>
                                                     <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--accent-primary)' }}>
@@ -608,12 +591,6 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                                                     <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Distance</div>
                                                     <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'white' }}>
                                                         {stats.distance ? parseFloat(stats.distance).toFixed(2) : '–'} <span style={{ fontSize: '0.8rem' }}>km</span>
-                                                    </div>
-                                                </div>
-                                                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
-                                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Foil Time</div>
-                                                    <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#5cb85c' }}>
-                                                        {stats.timeOnFoil ? Math.round(stats.timeOnFoil) : '–'} <span style={{ fontSize: '0.8rem' }}>min</span>
                                                     </div>
                                                 </div>
                                             </div>

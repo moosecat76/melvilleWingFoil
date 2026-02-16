@@ -104,14 +104,14 @@ const SessionMap = ({ polyline, summary_polyline, streams }) => {
             return renderSimpleMap();
         }
 
-        // Buckets based on user request (<1: stopped, 1-2: crawl, 2-3: planing, 3-5: foil, 5+: cranking)
-        // Using m/s for thresholds as requested (1 m/s ≈ 2 kts)
+        // Buckets based on user request (<0.2: stopped, 0.2-0.8: crawl, 0.8-1: planing, 1-2: foil, 2+: cranking)
+        // Using m/s for thresholds as requested
         const buckets = {
-            stopped: [],  // < 1 m/s
-            crawl: [],    // 1-2 m/s
-            planing: [],  // 2-3 m/s
-            foil: [],     // 3-5 m/s
-            cranking: []  // > 5 m/s
+            stopped: [],  // < 0.2 m/s
+            crawl: [],    // 0.2-0.8 m/s
+            planing: [],  // 0.8-1 m/s
+            foil: [],     // 1-2 m/s
+            cranking: []  // > 2 m/s
         };
 
         for (let i = 1; i < latlngStream.length; i++) {
@@ -120,10 +120,10 @@ const SessionMap = ({ polyline, summary_polyline, streams }) => {
             const speedMs = (velocityStream[i - 1] + velocityStream[i]) / 2;
             const segment = [p1, p2];
 
-            if (speedMs < 1) buckets.stopped.push(segment);
-            else if (speedMs < 2) buckets.crawl.push(segment);
-            else if (speedMs < 3) buckets.planing.push(segment);
-            else if (speedMs < 5) buckets.foil.push(segment);
+            if (speedMs < 0.2) buckets.stopped.push(segment);
+            else if (speedMs < 0.8) buckets.crawl.push(segment);
+            else if (speedMs < 1) buckets.planing.push(segment);
+            else if (speedMs < 2) buckets.foil.push(segment);
             else buckets.cranking.push(segment);
         }
 
@@ -155,11 +155,11 @@ const SessionMap = ({ polyline, summary_polyline, streams }) => {
                     <div className="leaflet-bottom leaflet-right" style={{ pointerEvents: 'none', margin: '10px', marginBottom: '20px' }}>
                         <div className="leaflet-control" style={{ background: 'rgba(15, 23, 42, 0.9)', padding: '10px', borderRadius: '8px', color: '#f8fafc', fontSize: '0.75rem', pointerEvents: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', border: '1px solid rgba(148, 163, 184, 0.2)', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.3)' }}>
                             <div style={{ fontWeight: 'bold', marginBottom: '2px', borderBottom: '1px solid rgba(148, 163, 184, 0.2)', paddingBottom: '2px', color: '#38bdf8' }}>Speed (m/s)</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#94a3b8', borderRadius: '2px' }}></span> &lt; 1 (Stopped)</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#f87171', borderRadius: '2px' }}></span> 1 - 2 (Crawl)</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#fbbf24', borderRadius: '2px' }}></span> 2 - 3 (Planing)</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#4ade80', borderRadius: '2px' }}></span> 3 - 5 (Foil)</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#818cf8', borderRadius: '2px' }}></span> 5+ (Cranking)</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#94a3b8', borderRadius: '2px' }}></span> &lt; 0.2 (Stopped)</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#f87171', borderRadius: '2px' }}></span> 0.2 - 0.8 (Crawl)</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#fbbf24', borderRadius: '2px' }}></span> 0.8 - 1 (Planing)</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#4ade80', borderRadius: '2px' }}></span> 1 - 2 (Foil)</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#818cf8', borderRadius: '2px' }}></span> 2+ (Cranking)</div>
                         </div>
                     </div>
                 </MapContainer>
