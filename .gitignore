@@ -1,2 +1,20 @@
-wind-foil-app/example-data/wind-foil-backup-2026-02-01.json
+# Local environment files
 wind-foil-app/.env
+wind-foil-app/.env.local
+wind-foil-app/.env.*.local
+
+# Workspace and Editor files
+*.code-workspace
+.vscode/
+.idea/
+
+# Agent data
+.agent/
+
+# Logs and temporary test files
+wind-foil-app/*.txt
+wind-foil-app/logs/
+*.log
+
+# Example data backups
+wind-foil-app/example-data/wind-foil-backup-*.json
