@@ -6,6 +6,7 @@ import { getWeatherForecast, getTideForecast, getActualWeather, processChartData
 import { getWindRating, getGearRecommendation } from '../services/recommendationService';
 import { useLocation } from '../context/LocationContext';
 import { useAuth } from '../context/AuthContext';
+import { migrateLocalStorageToFirestore } from '../services/dbService';
 
 import MapComponent from './MapComponent';
 import GearSelector from './GearSelector';
@@ -41,7 +42,8 @@ const CustomArrowDot = (props) => {
 
 const Dashboard = () => {
     const { currentLocation } = useLocation();
-    const { user } = useAuth(); // Placeholder for future auth
+    const { user } = useAuth();
+    const [stravaUser, setStravaUser] = useState(null);
 
     const [data, setData] = useState([]);
     const [daily, setDaily] = useState(null);
@@ -105,23 +107,38 @@ const Dashboard = () => {
         fetchData();
     }, [currentLocation]);
 
+    // Auto-migrate localStorage data on first login
+    useEffect(() => {
+        if (user?.uid) {
+            migrateLocalStorageToFirestore(user.uid).catch(console.error);
+        }
+    }, [user?.uid]);
+
+    // Fetch Strava user on mount / user change
+    useEffect(() => {
+        const fetchStravaUser = async () => {
+            const su = await getStravaUser(user?.uid);
+            setStravaUser(su);
+        };
+        fetchStravaUser();
+    }, [user?.uid]);
+
     // Check for Strava Callback
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         const code = params.get('code');
-        if (code && !getStravaUser()) {
-            handleStravaCallback(code).then(() => {
-                // Remove code from URL
+        if (code) {
+            handleStravaCallback(code, user?.uid).then((athlete) => {
                 window.history.replaceState({}, document.title, "/");
+                setStravaUser(athlete);
                 alert('Strava Connected!');
-                // Force re-render or state update if needed
-                setLoading(false); // trigger update
+                setLoading(false);
             }).catch(e => {
                 console.error(e);
                 alert('Failed to connect Strava');
             });
         }
-    }, []);
+    }, [user?.uid]);
 
     const handleImport = async (e) => {
         const file = e.target.files[0];
@@ -490,14 +507,14 @@ const Dashboard = () => {
 
                         <div style={{ width: '1px', background: 'var(--border-color)', margin: '0 10px' }}></div>
 
-                        {!getStravaUser() ? (
+                        {!stravaUser ? (
                             <button onClick={initiateStravaAuth} style={{ background: '#fc4c02', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <Activity size={16} /> Connect Strava
                             </button>
                         ) : (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)' }}>
                                 <Activity size={16} color="#fc4c02" />
-                                <span>Connected as {getStravaUser().firstname}</span>
+                                <span>Connected as {stravaUser.firstname}</span>
                             </div>
                         )}
                     </div>

@@ -19,7 +19,10 @@ vi.mock('../../context/LocationContext', () => ({
 
 vi.mock('../../context/AuthContext', () => ({
     useAuth: () => ({
-        user: { displayName: 'TestUser' }
+        user: { uid: 'test-uid', displayName: 'TestUser', email: 'test@example.com', photoURL: null },
+        login: vi.fn(),
+        logout: vi.fn(),
+        loading: false,
     })
 }));
 
@@ -62,6 +65,28 @@ vi.mock('../../services/weatherService', () => ({
     getTideForecast: vi.fn(),
     getActualWeather: vi.fn(),
     processChartData: vi.fn()
+}));
+
+vi.mock('../../services/stravaService', () => ({
+    initiateStravaAuth: vi.fn(),
+    handleStravaCallback: vi.fn(),
+    getStravaUser: vi.fn().mockResolvedValue(null),
+    getActivities: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock('../../services/dbService', () => ({
+    migrateLocalStorageToFirestore: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../../services/firebaseSetup', () => ({
+    auth: {},
+    googleProvider: {},
+    db: {},
+}));
+
+vi.mock('../../services/storageService', () => ({
+    exportData: vi.fn(),
+    importData: vi.fn().mockResolvedValue({ success: true }),
 }));
 
 // Mock sub-components that might cause issues or noise

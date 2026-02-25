@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from '../context/LocationContext';
+import { useAuth } from '../context/AuthContext';
 import { getJournalEntries, addJournalEntry, deleteJournalEntry, updateJournalEntry } from '../services/journalService';
 import { Book, Plus, Trash2, Edit2, Calendar, Wind, Clock, MapPin, X, Activity } from 'lucide-react';
 import { format } from 'date-fns';
@@ -19,10 +20,12 @@ const legacyCalculateStats = (streams, maxSpeedMs = 0, distanceMeters = 0) => {
 
 const Journal = ({ weatherData, userGear = [], onAddGear }) => {
     const { currentLocation } = useLocation();
+    const { user } = useAuth();
     const [entries, setEntries] = useState([]);
     const [isAdding, setIsAdding] = useState(false);
     const [editId, setEditId] = useState(null);
     const [activeTab, setActiveTab] = useState('details');
+    const [stravaConnected, setStravaConnected] = useState(false);
 
     // Form State
     const [logDate, setLogDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -54,7 +57,16 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
     useEffect(() => {
         // Load all entries
         setEntries(getJournalEntries());
-    }, [currentLocation]); // Reload if location changes (just to be safe, though global list doesn't depend on location)
+    }, [currentLocation]);
+
+    // Check Strava connection status
+    useEffect(() => {
+        const checkStrava = async () => {
+            const su = await getStravaUser(user?.uid);
+            setStravaConnected(!!su);
+        };
+        checkStrava();
+    }, [user?.uid]);
 
     // Smart Fill Logic
     useEffect(() => {
@@ -147,7 +159,7 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
 
     const fetchStravaActivities = async () => {
         try {
-            const acts = await getActivities();
+            const acts = await getActivities(user?.uid);
             if (acts && acts.length > 0) {
                 setStravaActivities(acts);
                 setShowActivityPicker(true);
@@ -170,7 +182,7 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
         // Fetch detailed streams for analysis
         let streams = null;
         try {
-            streams = await getActivityStreams(activity.id);
+            streams = await getActivityStreams(activity.id, user?.uid);
         } catch (e) {
             console.error('Failed to fetch streams', e);
         }
@@ -404,7 +416,7 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                     {/* Tab Content: Map & Stats */}
                     {activeTab === 'map' && (
                         <div style={{ minHeight: '200px' }}>
-                            {getStravaUser() ? (
+                            {stravaConnected ? (
                                 <>
                                     {!newEntry.stravaActivityId && (
                                         <button type="button" onClick={fetchStravaActivities} className="btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: '#fc4c02', color: 'white', border: 'none', marginBottom: '10px' }}>

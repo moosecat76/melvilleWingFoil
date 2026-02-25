@@ -1,5 +1,6 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { useLocation } from '../context/LocationContext';
+import { useAuth } from '../context/AuthContext';
 import { getJournalEntries, addJournalEntry, deleteJournalEntry, updateJournalEntry } from '../services/journalService';
 import { Book, Plus, Trash2, Edit2, Calendar, Wind, Clock, MapPin, X, Activity, ChevronRight } from 'lucide-react';
 import { format } from 'date-fns';
@@ -18,11 +19,22 @@ const legacyCalculateStats = (streams, maxSpeedMs = 0, distanceMeters = 0) => {
 
 const SessionsPage = () => {
     const { currentLocation } = useLocation();
+    const { user } = useAuth();
     const navigate = useNavigate();
     const [entries, setEntries] = useState([]);
     const [isAdding, setIsAdding] = useState(false);
     const [editId, setEditId] = useState(null);
     const [activeTab, setActiveTab] = useState('details');
+    const [stravaConnected, setStravaConnected] = useState(false);
+
+    // Check Strava connection status
+    useEffect(() => {
+        const checkStrava = async () => {
+            const su = await getStravaUser(user?.uid);
+            setStravaConnected(!!su);
+        };
+        checkStrava();
+    }, [user?.uid]);
 
     // Gear state (read from localStorage for the form)
     const userGear = JSON.parse(localStorage.getItem('melvill_user_gear') || '[]');
@@ -133,7 +145,7 @@ const SessionsPage = () => {
 
     const fetchStravaActivities = async () => {
         try {
-            const acts = await getActivities();
+            const acts = await getActivities(user?.uid);
             if (acts && acts.length > 0) {
                 setStravaActivities(acts);
                 setShowActivityPicker(true);
@@ -153,7 +165,7 @@ const SessionsPage = () => {
 
         let streams = null;
         try {
-            streams = await getActivityStreams(activity.id);
+            streams = await getActivityStreams(activity.id, user?.uid);
         } catch (e) {
             console.error('Failed to fetch streams', e);
         }
@@ -383,7 +395,7 @@ const SessionsPage = () => {
                     {/* Tab Content: Map & Stats */}
                     {activeTab === 'map' && (
                         <div style={{ minHeight: '200px' }}>
-                            {getStravaUser() ? (
+                            {stravaConnected ? (
                                 <>
                                     {!newEntry.stravaActivityId && (
                                         <button type="button" onClick={fetchStravaActivities} className="btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: '#fc4c02', color: 'white', border: 'none', marginBottom: '10px' }}>
