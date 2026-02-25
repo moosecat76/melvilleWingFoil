@@ -8,6 +8,9 @@ export default defineConfig({
     host: true, // Listen on all local IP addresses
     allowedHosts: true, // Allow all hosts to prevent "Host not allowed" errors
   },
+  build: {
+    chunkSizeWarningLimit: 1500, // Firebase SDK is large
+  },
   test: {
     environment: 'happy-dom',
     setupFiles: './src/test/setup.js',

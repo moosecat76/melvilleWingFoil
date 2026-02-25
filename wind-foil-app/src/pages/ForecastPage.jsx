@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
-import { Wind, Navigation, ThumbsUp, ThumbsDown, ArrowUp, AlertTriangle, Anchor, Waves } from 'lucide-react';
+import { Wind, Navigation, ThumbsUp, ThumbsDown, ArrowUp, AlertTriangle, Anchor, Waves, LogIn, LogOut, User } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, ComposedChart, ReferenceLine, ReferenceArea, Label } from 'recharts';
 import { getWeatherForecast, getTideForecast, getActualWeather, processChartData } from '../services/weatherService';
 import { getWindRating, getGearRecommendation } from '../services/recommendationService';
@@ -13,6 +13,7 @@ import LocationManager from '../components/LocationManager';
 import BestTime from '../components/BestTime';
 import { exportData, importData } from '../services/storageService';
 import { initiateStravaAuth, handleStravaCallback, getStravaUser, getActivities } from '../services/stravaService';
+import { migrateLocalStorageToFirestore } from '../services/dbService';
 import { Download, Upload, Database, Activity } from 'lucide-react';
 
 const CustomArrowDot = (props) => {
@@ -40,7 +41,8 @@ const CustomArrowDot = (props) => {
 
 const ForecastPage = () => {
     const { currentLocation } = useLocation();
-    const { user } = useAuth();
+    const { user, login, logout, loading: authLoading } = useAuth();
+    const [stravaUser, setStravaUser] = useState(null);
 
     const [data, setData] = useState([]);
     const [daily, setDaily] = useState(null);
@@ -101,13 +103,30 @@ const ForecastPage = () => {
         fetchData();
     }, [currentLocation]);
 
+    // Auto-migrate localStorage data on first login
+    useEffect(() => {
+        if (user?.uid) {
+            migrateLocalStorageToFirestore(user.uid).catch(console.error);
+        }
+    }, [user?.uid]);
+
+    // Fetch Strava user on mount / user change
+    useEffect(() => {
+        const fetchStravaUser = async () => {
+            const su = await getStravaUser(user?.uid);
+            setStravaUser(su);
+        };
+        fetchStravaUser();
+    }, [user?.uid]);
+
     // Check for Strava Callback
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         const code = params.get('code');
-        if (code && !getStravaUser()) {
-            handleStravaCallback(code).then(() => {
+        if (code) {
+            handleStravaCallback(code, user?.uid).then((athlete) => {
                 window.history.replaceState({}, document.title, "/");
+                setStravaUser(athlete);
                 alert('Strava Connected!');
                 setLoading(false);
             }).catch(e => {
@@ -115,7 +134,7 @@ const ForecastPage = () => {
                 alert('Failed to connect Strava');
             });
         }
-    }, []);
+    }, [user?.uid]);
 
     const handleImport = async (e) => {
         const file = e.target.files[0];
@@ -177,6 +196,19 @@ const ForecastPage = () => {
                         <button className={unit === 'kmh' ? 'active' : ''} onClick={() => setUnit('kmh')}>km/h</button>
                         <button className={unit === 'knots' ? 'active' : ''} onClick={() => setUnit('knots')}>knots</button>
                     </div>
+                    {user ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            {user.photoURL && <img src={user.photoURL} alt="" style={{ width: 28, height: 28, borderRadius: '50%' }} />}
+                            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{user.displayName?.split(' ')[0]}</span>
+                            <button onClick={logout} className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <LogOut size={14} /> Sign Out
+                            </button>
+                        </div>
+                    ) : (
+                        <button onClick={login} disabled={authLoading} style={{ background: 'var(--accent-primary)', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '0.85rem' }}>
+                            <LogIn size={16} /> Sign in with Google
+                        </button>
+                    )}
                 </div>
             </header>
 
@@ -466,14 +498,14 @@ const ForecastPage = () => {
 
                         <div style={{ width: '1px', background: 'var(--border-color)', margin: '0 10px' }}></div>
 
-                        {!getStravaUser() ? (
+                        {!stravaUser ? (
                             <button onClick={initiateStravaAuth} style={{ background: '#fc4c02', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <Activity size={16} /> Connect Strava
                             </button>
                         ) : (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)' }}>
                                 <Activity size={16} color="#fc4c02" />
-                                <span>Connected as {getStravaUser().firstname}</span>
+                                <span>Connected as {stravaUser.firstname}</span>
                             </div>
                         )}
                     </div>
