@@ -151,9 +151,17 @@ const ForecastPage = () => {
         try {
             setLoading(true);
             const result = await importData(file);
+            console.log('--- DB IMPORT DIAGNOSTIC ---');
+            console.log('Result Data Keys:', result.data ? Object.keys(result.data) : 'none');
+            console.log('User UID:', user?.uid);
+
             if (user?.uid && result.data) {
+                console.log('Starting Cloud Restore...');
                 const { restoreBackupToFirestore } = await import('../services/dbService');
                 await restoreBackupToFirestore(user.uid, result.data);
+                console.log('Cloud Restore Finished');
+            } else {
+                console.log('Skipping Cloud Restore, user not logged in or missing data');
             }
             alert(`Successfully restored! Reloading...`);
             window.location.reload();

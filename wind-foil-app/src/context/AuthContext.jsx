@@ -10,24 +10,15 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-            if (firebaseUser) {
-                // Launch migration automatically on valid login and block UI until finished
+        const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+            if (currentUser) {
                 try {
-                    await migrateLocalStorageToFirestore(firebaseUser.uid);
-                } catch (e) {
-                    console.error("Migration error:", e);
+                    await migrateLocalStorageToFirestore(currentUser.uid);
+                } catch (error) {
+                    console.error('Migration failed:', error);
                 }
-
-                setUser({
-                    uid: firebaseUser.uid,
-                    displayName: firebaseUser.displayName,
-                    email: firebaseUser.email,
-                    photoURL: firebaseUser.photoURL,
-                });
-            } else {
-                setUser(null);
             }
+            setUser(currentUser);
             setLoading(false);
         });
 
