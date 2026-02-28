@@ -13,7 +13,7 @@ import LocationManager from '../components/LocationManager';
 import BestTime from '../components/BestTime';
 import { exportData, importData } from '../services/storageService';
 import { initiateStravaAuth, handleStravaCallback, getStravaUser, getActivities } from '../services/stravaService';
-import { migrateLocalStorageToFirestore } from '../services/dbService';
+import { migrateLocalStorageToFirestore, saveUserGear } from '../services/dbService';
 import { Download, Upload, Database, Activity } from 'lucide-react';
 
 const CustomArrowDot = (props) => {
@@ -51,16 +51,28 @@ const ForecastPage = () => {
     const [error, setError] = useState(null);
 
     // Gear State
-    const [userGear, setUserGear] = useState(() => {
-        const saved = localStorage.getItem('melvill_user_gear');
-        return saved ? JSON.parse(saved) : [];
-    });
-    const [showGearSelector, setShowGearSelector] = useState(false);
-    const [unit, setUnit] = useState('knots');
-
+    const [userGear, setUserGear] = useState([]);
     useEffect(() => {
-        localStorage.setItem('melvill_user_gear', JSON.stringify(userGear));
-    }, [userGear]);
+        const fetchGear = async () => {
+            if (user?.uid) {
+                const { getUserGear } = await import('../services/dbService');
+                const gear = await getUserGear(user.uid);
+                setUserGear(gear);
+            } else {
+                setUserGear(JSON.parse(localStorage.getItem('melvill_user_gear') || '[]'));
+            }
+        };
+        fetchGear();
+    }, [user?.uid]);
+
+    const handleSaveGear = async (items) => {
+        setUserGear(items);
+        if (user?.uid) {
+            await saveUserGear(user.uid, items);
+        } else {
+            localStorage.setItem('melvill_user_gear', JSON.stringify(items));
+        }
+    };
 
     useEffect(() => {
         const fetchData = async () => {
@@ -290,7 +302,7 @@ const ForecastPage = () => {
                                     <div style={{ marginTop: '1rem' }}>
                                         <GearSelector
                                             currentGear={userGear}
-                                            onSave={(items) => setUserGear(items)}
+                                            onSave={handleSaveGear}
                                             onClose={() => setShowGearSelector(false)}
                                         />
                                     </div>

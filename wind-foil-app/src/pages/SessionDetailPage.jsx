@@ -2,8 +2,9 @@ import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getJournalEntries } from '../services/journalService';
 import { analyzeSession } from '../services/foilAnalysisService';
-import { ArrowLeft, MapPin, Wind, Clock, Calendar } from 'lucide-react';
+import { ArrowLeft, MapPin, Wind, Clock } from 'lucide-react';
 import { format } from 'date-fns';
+import { useAuth } from '../context/AuthContext';
 
 const SessionMap = lazy(() => import('../components/SessionMap'));
 const FoilAnalysisChart = lazy(() => import('../components/FoilAnalysisChart'));
@@ -11,22 +12,26 @@ const FoilAnalysisChart = lazy(() => import('../components/FoilAnalysisChart'));
 const SessionDetailPage = () => {
     const { id } = useParams();
     const navigate = useNavigate();
+    const { user } = useAuth();
     const [entry, setEntry] = useState(null);
     const [analysis, setAnalysis] = useState(null);
 
     useEffect(() => {
-        const entries = getJournalEntries();
-        const found = entries.find(e => e.id === id);
-        if (found) {
-            setEntry(found);
-            // Compute analysis
-            let a = found.foilAnalysis;
-            if (!a && found.streams) {
-                a = analyzeSession(found.streams);
+        const fetchEntries = async () => {
+            const entries = await getJournalEntries(user?.uid);
+            const found = entries.find(e => e.id === id);
+            if (found) {
+                setEntry(found);
+                // Compute analysis
+                let a = found.foilAnalysis;
+                if (!a && found.streams) {
+                    a = analyzeSession(found.streams);
+                }
+                setAnalysis(a);
             }
-            setAnalysis(a);
-        }
-    }, [id]);
+        };
+        fetchEntries();
+    }, [id, user?.uid]);
 
     if (!entry) {
         return (

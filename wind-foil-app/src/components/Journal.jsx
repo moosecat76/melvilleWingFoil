@@ -55,9 +55,12 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
     };
 
     useEffect(() => {
-        // Load all entries
-        setEntries(getJournalEntries());
-    }, [currentLocation]);
+        const fetchEntries = async () => {
+            const data = await getJournalEntries(user?.uid);
+            setEntries(data);
+        };
+        fetchEntries();
+    }, [currentLocation, user?.uid]);
 
     // Check Strava connection status
     useEffect(() => {
@@ -91,7 +94,7 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
         }
     }, [logDate, logTime, isAdding, weatherData]);
 
-    const handleAdd = (e) => {
+    const handleAdd = async (e) => {
         e.preventDefault();
 
         const entryData = {
@@ -112,12 +115,12 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
         };
 
         if (editId) {
-            const updated = updateJournalEntry({ ...entryData, id: editId });
+            const updated = await updateJournalEntry({ ...entryData, id: editId }, user?.uid);
             if (updated) {
                 setEntries(entries.map(e => e.id === editId ? updated : e));
             }
         } else {
-            const added = addJournalEntry(entryData);
+            const added = await addJournalEntry(entryData, user?.uid);
             setEntries([added, ...entries]);
         }
 
@@ -149,9 +152,11 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
         setIsAdding(true);
     };
 
-    const handleDelete = (id) => {
-        deleteJournalEntry(id);
-        setEntries(entries.filter(e => e.id !== id));
+    const handleDelete = async (id) => {
+        if (window.confirm('Delete this session?')) {
+            await deleteJournalEntry(id, user?.uid);
+            setEntries(entries.filter(e => e.id !== id));
+        }
     };
 
     const [stravaActivities, setStravaActivities] = useState([]);

@@ -6,7 +6,7 @@ import { getWeatherForecast, getTideForecast, getActualWeather, processChartData
 import { getWindRating, getGearRecommendation } from '../services/recommendationService';
 import { useLocation } from '../context/LocationContext';
 import { useAuth } from '../context/AuthContext';
-import { migrateLocalStorageToFirestore } from '../services/dbService';
+import { migrateLocalStorageToFirestore, saveUserGear } from '../services/dbService';
 
 import MapComponent from './MapComponent';
 import GearSelector from './GearSelector';
@@ -52,17 +52,32 @@ const Dashboard = () => {
     const [error, setError] = useState(null);
 
     // Gear State
-    const [userGear, setUserGear] = useState(() => {
-        const saved = localStorage.getItem('melvill_user_gear');
-        return saved ? JSON.parse(saved) : [];
-    });
+    const [userGear, setUserGear] = useState([]);
+    useEffect(() => {
+        const fetchGear = async () => {
+            if (user?.uid) {
+                const { getUserGear } = await import('../services/dbService');
+                const gear = await getUserGear(user.uid);
+                setUserGear(gear);
+            } else {
+                setUserGear(JSON.parse(localStorage.getItem('melvill_user_gear') || '[]'));
+            }
+        };
+        fetchGear();
+    }, [user?.uid]);
+
+    const handleSaveGear = async (items) => {
+        setUserGear(items);
+        if (user?.uid) {
+            await saveUserGear(user.uid, items);
+        } else {
+            localStorage.setItem('melvill_user_gear', JSON.stringify(items));
+        }
+    };
+
     const [showGearSelector, setShowGearSelector] = useState(false);
     // User requested consistency, default to knots.
     const [unit, setUnit] = useState('knots');
-
-    useEffect(() => {
-        localStorage.setItem('melvill_user_gear', JSON.stringify(userGear));
-    }, [userGear]);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -284,7 +299,7 @@ const Dashboard = () => {
                                     <div style={{ marginTop: '1rem' }}>
                                         <GearSelector
                                             currentGear={userGear}
-                                            onSave={(items) => setUserGear(items)}
+                                            onSave={handleSaveGear}
                                             onClose={() => setShowGearSelector(false)}
                                         />
                                     </div>

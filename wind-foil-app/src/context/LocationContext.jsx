@@ -1,4 +1,11 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
+import { useAuth } from './AuthContext';
+import {
+    getUserLocations,
+    saveUserLocations,
+    getCurrentLocationId,
+    saveCurrentLocationId
+} from '../services/dbService';
 
 const LocationContext = createContext();
 
@@ -11,6 +18,8 @@ const DEFAULT_LOCATION = {
 };
 
 export const LocationProvider = ({ children }) => {
+    const { user } = useAuth();
+
     const [locations, setLocations] = useState(() => {
         const saved = localStorage.getItem('locations');
         let parsed = saved ? JSON.parse(saved) : [DEFAULT_LOCATION];
@@ -38,12 +47,48 @@ export const LocationProvider = ({ children }) => {
     });
 
     useEffect(() => {
-        localStorage.setItem('locations', JSON.stringify(locations));
-    }, [locations]);
+        const fetchRemote = async () => {
+            if (user?.uid) {
+                const remoteLocations = await getUserLocations(user.uid);
+                if (remoteLocations && remoteLocations.length > 0) {
+                    setLocations(remoteLocations);
+                }
+                const remoteCurrentLocationId = await getCurrentLocationId(user.uid);
+                if (remoteCurrentLocationId) {
+                    const found = (remoteLocations && remoteLocations.length > 0 ? remoteLocations : locations).find(l => l.id === remoteCurrentLocationId);
+                    if (found) setCurrentLocation(found);
+                }
+            } else {
+                // Refetch local on logout
+                const saved = localStorage.getItem('locations');
+                if (saved) setLocations(JSON.parse(saved));
+
+                const savedId = localStorage.getItem('currentLocationId');
+                if (savedId) {
+                    const savedLocs = JSON.parse(localStorage.getItem('locations') || '[]');
+                    const found = savedLocs.find(l => l.id === savedId);
+                    if (found) setCurrentLocation({ ...found, idealWindDirection: found.idealWindDirection || { min: 0, max: 360 } });
+                }
+            }
+        };
+        fetchRemote();
+    }, [user?.uid]);
 
     useEffect(() => {
-        localStorage.setItem('currentLocationId', currentLocation.id);
-    }, [currentLocation]);
+        if (user?.uid) {
+            saveUserLocations(user.uid, locations);
+        } else {
+            localStorage.setItem('locations', JSON.stringify(locations));
+        }
+    }, [locations, user?.uid]);
+
+    useEffect(() => {
+        if (user?.uid) {
+            saveCurrentLocationId(user.uid, currentLocation.id);
+        } else {
+            localStorage.setItem('currentLocationId', currentLocation.id);
+        }
+    }, [currentLocation, user?.uid]);
 
     const addLocation = (name, lat, lon, idealMin = 0, idealMax = 360) => {
         const newLoc = {

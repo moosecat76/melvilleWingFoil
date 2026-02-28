@@ -36,8 +36,20 @@ const SessionsPage = () => {
         checkStrava();
     }, [user?.uid]);
 
-    // Gear state (read from localStorage for the form)
-    const userGear = JSON.parse(localStorage.getItem('melvill_user_gear') || '[]');
+    // Gear state 
+    const [userGear, setUserGear] = useState([]);
+    useEffect(() => {
+        const fetchGear = async () => {
+            if (user?.uid) {
+                const { getUserGear } = await import('../services/dbService');
+                const gear = await getUserGear(user.uid);
+                setUserGear(gear);
+            } else {
+                setUserGear(JSON.parse(localStorage.getItem('melvill_user_gear') || '[]'));
+            }
+        };
+        fetchGear();
+    }, [user?.uid]);
 
     // Form State
     const [logDate, setLogDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -67,8 +79,12 @@ const SessionsPage = () => {
     };
 
     useEffect(() => {
-        setEntries(getJournalEntries());
-    }, [currentLocation]);
+        const fetchEntries = async () => {
+            const data = await getJournalEntries(user?.uid);
+            setEntries(data);
+        }
+        fetchEntries();
+    }, [currentLocation, user?.uid]);
 
     // Smart Fill Logic — uses weather data from localStorage if available
     const [weatherData, setWeatherData] = useState([]);
@@ -77,7 +93,7 @@ const SessionsPage = () => {
         // In future, could share via context or localStorage
     }, [logDate, logTime, isAdding]);
 
-    const handleAdd = (e) => {
+    const handleAdd = async (e) => {
         e.preventDefault();
 
         const entryData = {
@@ -98,12 +114,12 @@ const SessionsPage = () => {
         };
 
         if (editId) {
-            const updated = updateJournalEntry({ ...entryData, id: editId });
+            const updated = await updateJournalEntry({ ...entryData, id: editId }, user?.uid);
             if (updated) {
                 setEntries(entries.map(e => e.id === editId ? updated : e));
             }
         } else {
-            const added = addJournalEntry(entryData);
+            const added = await addJournalEntry(entryData, user?.uid);
             setEntries([added, ...entries]);
         }
 
@@ -135,9 +151,11 @@ const SessionsPage = () => {
         setIsAdding(true);
     };
 
-    const handleDelete = (id) => {
-        deleteJournalEntry(id);
-        setEntries(entries.filter(e => e.id !== id));
+    const handleDelete = async (id) => {
+        if (window.confirm('Delete this session?')) {
+            await deleteJournalEntry(id, user?.uid);
+            setEntries(entries.filter(e => e.id !== id));
+        }
     };
 
     const [stravaActivities, setStravaActivities] = useState([]);
