@@ -116,21 +116,26 @@ const SessionsPage = () => {
             foilAnalysis: newEntry.foilAnalysis
         };
 
-        if (editId) {
-            const updated = await updateJournalEntry({ ...entryData, id: editId }, user?.uid);
-            if (updated) {
-                setEntries(entries.map(e => e.id === editId ? updated : e));
+        try {
+            if (editId) {
+                const updated = await updateJournalEntry({ ...entryData, id: editId }, user?.uid);
+                if (updated) {
+                    setEntries(entries.map(e => e.id === editId ? updated : e));
+                }
+            } else {
+                const added = await addJournalEntry(entryData, user?.uid);
+                setEntries([added, ...entries]);
             }
-        } else {
-            const added = await addJournalEntry(entryData, user?.uid);
-            setEntries([added, ...entries]);
-        }
 
-        // Reset
-        setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '', stravaActivityId: null, mapPolyline: null, activityStats: null, foilAnalysis: null });
-        setIsAdding(false);
-        setEditId(null);
-        setShowActivityPicker(false);
+            // Reset
+            setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '', stravaActivityId: null, mapPolyline: null, activityStats: null, foilAnalysis: null });
+            setIsAdding(false);
+            setEditId(null);
+            setShowActivityPicker(false);
+        } catch (err) {
+            console.error('Failed to save journal entry:', err);
+            alert('Failed to save entry: ' + err.message + '\n\nSee browser console for details.');
+        }
     };
 
     const handleEdit = (entry) => {

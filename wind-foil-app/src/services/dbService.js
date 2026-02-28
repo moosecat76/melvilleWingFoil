@@ -36,13 +36,16 @@ export const getJournalEntries = async (uid) => {
 };
 
 export const addJournalEntry = async (uid, entry) => {
+    // Strip the heavy streams blob — keep it in localStorage for offline use only.
+    // Strava streams can be 100-400KB; Firestore documents have a 1MB limit.
+    const { streams, ...entryWithoutStreams } = entry;
     const newEntry = {
         date: new Date().toISOString(),
-        ...entry,
+        ...entryWithoutStreams,
         createdAt: serverTimestamp(),
     };
     const ref = await addDoc(journalCol(uid), newEntry);
-    return { id: ref.id, ...newEntry };
+    return { id: ref.id, ...newEntry, streams }; // Re-attach streams for in-memory state
 };
 
 export const updateJournalEntry = async (uid, entryId, data) => {
@@ -131,12 +134,12 @@ export const migrateLocalStorageToFirestore = async (uid) => {
             for (const entry of entries) {
                 const isDuplicate = existing.some(e => e.date === entry.date && e.notes === entry.notes);
                 if (!isDuplicate) {
-                    const { id, ...rest } = entry; // Strip local ID so Firestore makes one
+                    const { id, streams, ...rest } = entry; // Strip local ID and heavy streams
                     try {
                         await addDoc(journalCol(uid), rest);
                         added++;
                     } catch (err) {
-                        console.error('Failed to migrate journal entry:', rest, err);
+                        console.error('Failed to migrate journal entry:', entry.date, err.code, err.message);
                     }
                 }
             }
@@ -216,12 +219,12 @@ export const restoreBackupToFirestore = async (uid, backupData) => {
         for (const entry of entries) {
             const isDuplicate = existing.some(e => e.date === entry.date && e.notes === entry.notes);
             if (!isDuplicate) {
-                const { id, ...rest } = entry; // Strip local ID
+                const { id, streams, ...rest } = entry; // Strip local ID and heavy streams data
                 try {
                     await addDoc(journalCol(uid), rest);
                     added++;
                 } catch (err) {
-                    console.error('Failed to restore journal entry:', rest, err);
+                    console.error('Failed to restore journal entry:', entry.date, err.code, err.message);
                 }
             }
         }
