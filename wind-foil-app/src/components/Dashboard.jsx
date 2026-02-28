@@ -6,7 +6,7 @@ import { getWeatherForecast, getTideForecast, getActualWeather, processChartData
 import { getWindRating, getGearRecommendation } from '../services/recommendationService';
 import { useLocation } from '../context/LocationContext';
 import { useAuth } from '../context/AuthContext';
-import { migrateLocalStorageToFirestore, saveUserGear } from '../services/dbService';
+import { saveUserGear } from '../services/dbService';
 
 import MapComponent from './MapComponent';
 import GearSelector from './GearSelector';
@@ -42,7 +42,7 @@ const CustomArrowDot = (props) => {
 
 const Dashboard = () => {
     const { currentLocation } = useLocation();
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const [stravaUser, setStravaUser] = useState(null);
 
     const [data, setData] = useState([]);
@@ -54,6 +54,7 @@ const Dashboard = () => {
     // Gear State
     const [userGear, setUserGear] = useState([]);
     useEffect(() => {
+        if (authLoading) return;
         const fetchGear = async () => {
             if (user?.uid) {
                 const { getUserGear } = await import('../services/dbService');
@@ -64,7 +65,7 @@ const Dashboard = () => {
             }
         };
         fetchGear();
-    }, [user?.uid]);
+    }, [user?.uid, authLoading]);
 
     const handleSaveGear = async (items) => {
         setUserGear(items);
@@ -121,13 +122,6 @@ const Dashboard = () => {
         fetchData();
         fetchData();
     }, [currentLocation]);
-
-    // Auto-migrate localStorage data on first login
-    useEffect(() => {
-        if (user?.uid) {
-            migrateLocalStorageToFirestore(user.uid).catch(console.error);
-        }
-    }, [user?.uid]);
 
     // Fetch Strava user on mount / user change
     useEffect(() => {

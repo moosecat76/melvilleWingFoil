@@ -113,54 +113,143 @@ export const saveStravaTokens = async (uid, tokenData) => {
  * Call this right after a user logs in for the first time.
  */
 export const migrateLocalStorageToFirestore = async (uid) => {
-    // Journal entries
-    const localJournal = localStorage.getItem('wind_foil_journal_entries');
-    if (localJournal) {
-        const existing = await getJournalEntries(uid);
-        if (existing.length === 0) {
-            const entries = JSON.parse(localJournal);
-            for (const entry of entries) {
-                const { id, ...rest } = entry;
-                await addDoc(journalCol(uid), rest);
+    console.log('Starting DB Migration/Merge for UID:', uid);
+
+    // 1. Journal entries
+    try {
+        const localJournal = localStorage.getItem('wind_foil_journal_entries');
+        if (localJournal) {
+            let existing = [];
+            try {
+                existing = await getJournalEntries(uid);
+            } catch (e) {
+                console.warn('Could not fetch existing journal entries. Will push blindly.', e);
             }
-            console.log(`Migrated ${entries.length} journal entries to Firestore`);
+
+            const entries = JSON.parse(localJournal);
+            let added = 0;
+            for (const entry of entries) {
+                const isDuplicate = existing.some(e => e.date === entry.date && e.notes === entry.notes);
+                if (!isDuplicate) {
+                    const { id, ...rest } = entry; // Strip local ID so Firestore makes one
+                    try {
+                        await addDoc(journalCol(uid), rest);
+                        added++;
+                    } catch (err) {
+                        console.error('Failed to migrate journal entry:', rest, err);
+                    }
+                }
+            }
+            if (added > 0) console.log(`Migrated ${added} journal entries to Firestore`);
+        }
+    } catch (e) {
+        console.error('Critical error in Journal Migration', e);
+    }
+
+    // 2. Gear
+    try {
+        const localGear = localStorage.getItem('melvill_user_gear');
+        if (localGear) {
+            const cloudGear = await getUserGear(uid);
+            if (!cloudGear || cloudGear.length === 0) {
+                await saveUserGear(uid, JSON.parse(localGear));
+                console.log('Migrated gear to Firestore');
+            }
+        }
+    } catch (e) {
+        console.error('Gear migration failed', e);
+    }
+
+    // 3. Locations
+    try {
+        const localLocations = localStorage.getItem('locations');
+        if (localLocations) {
+            const cloudLocs = await getUserLocations(uid);
+            if (!cloudLocs || cloudLocs.length === 0) {
+                await saveUserLocations(uid, JSON.parse(localLocations));
+                const currentId = localStorage.getItem('currentLocationId');
+                if (currentId) await saveCurrentLocationId(uid, currentId);
+                console.log('Migrated locations to Firestore');
+            }
+        }
+    } catch (e) {
+        console.error('Locations migration failed', e);
+    }
+
+    // 4. Strava tokens
+    try {
+        const stravaAccess = localStorage.getItem('strava_access_token');
+        if (stravaAccess) {
+            const cloudStrava = await getStravaTokens(uid);
+            if (!cloudStrava) {
+                await saveStravaTokens(uid, {
+                    access_token: stravaAccess,
+                    refresh_token: localStorage.getItem('strava_refresh_token'),
+                    expires_at: localStorage.getItem('strava_expires_at'),
+                    athlete: JSON.parse(localStorage.getItem('strava_athlete') || 'null'),
+                });
+                console.log('Migrated Strava tokens to Firestore');
+            }
+        }
+    } catch (e) {
+        console.error('Strava token migration failed', e);
+    }
+};
+
+// ─── Restore backup directly to Firestore ────────────
+export const restoreBackupToFirestore = async (uid, backupData) => {
+    console.log('Starting Cloud Restore for UID:', uid);
+
+    // 1. Journal entries
+    if (backupData.wind_foil_journal_entries) {
+        let entries = backupData.wind_foil_journal_entries;
+        if (typeof entries === 'string') entries = JSON.parse(entries);
+
+        let existing = [];
+        try {
+            existing = await getJournalEntries(uid);
+        } catch (e) {
+            console.warn('Could not fetch existing journal entries. Will push blindly.', e);
+        }
+
+        let added = 0;
+        for (const entry of entries) {
+            const isDuplicate = existing.some(e => e.date === entry.date && e.notes === entry.notes);
+            if (!isDuplicate) {
+                const { id, ...rest } = entry; // Strip local ID
+                try {
+                    await addDoc(journalCol(uid), rest);
+                    added++;
+                } catch (err) {
+                    console.error('Failed to restore journal entry:', rest, err);
+                }
+            }
+        }
+        console.log(`Restored ${added} new journal entries to Firestore`);
+    }
+
+    // 2. Gear
+    if (backupData.melvill_user_gear || backupData.user_gear) {
+        let gear = backupData.melvill_user_gear || backupData.user_gear;
+        if (typeof gear === 'string') gear = JSON.parse(gear);
+        if (Array.isArray(gear)) {
+            await saveUserGear(uid, gear);
+            console.log('Restored Gear to Firestore');
         }
     }
 
-    // Gear
-    const localGear = localStorage.getItem('melvill_user_gear');
-    if (localGear) {
-        const cloudGear = await getUserGear(uid);
-        if (cloudGear.length === 0) {
-            await saveUserGear(uid, JSON.parse(localGear));
-            console.log('Migrated gear to Firestore');
+    // 3. Locations
+    if (backupData.locations) {
+        let locs = backupData.locations;
+        if (typeof locs === 'string') locs = JSON.parse(locs);
+        if (Array.isArray(locs)) {
+            await saveUserLocations(uid, locs);
+            console.log('Restored Locations to Firestore');
         }
     }
 
-    // Locations
-    const localLocations = localStorage.getItem('locations');
-    if (localLocations) {
-        const cloudLocs = await getUserLocations(uid);
-        if (!cloudLocs || cloudLocs.length === 0) {
-            await saveUserLocations(uid, JSON.parse(localLocations));
-            const currentId = localStorage.getItem('currentLocationId');
-            if (currentId) await saveCurrentLocationId(uid, currentId);
-            console.log('Migrated locations to Firestore');
-        }
-    }
-
-    // Strava tokens
-    const stravaAccess = localStorage.getItem('strava_access_token');
-    if (stravaAccess) {
-        const cloudStrava = await getStravaTokens(uid);
-        if (!cloudStrava) {
-            await saveStravaTokens(uid, {
-                access_token: stravaAccess,
-                refresh_token: localStorage.getItem('strava_refresh_token'),
-                expires_at: localStorage.getItem('strava_expires_at'),
-                athlete: JSON.parse(localStorage.getItem('strava_athlete') || 'null'),
-            });
-            console.log('Migrated Strava tokens to Firestore');
-        }
+    if (backupData.currentLocationId) {
+        await saveCurrentLocationId(uid, backupData.currentLocationId);
+        console.log('Restored Current Location ID');
     }
 };

@@ -6,6 +6,7 @@ import ForecastPage from './pages/ForecastPage';
 import SessionsPage from './pages/SessionsPage';
 import SessionDetailPage from './pages/SessionDetailPage';
 import BottomNav from './components/BottomNav';
+import DebugOverlay from './components/DebugOverlay';
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
             <Route path="/session/:id" element={<SessionDetailPage />} />
           </Routes>
           <BottomNav />
+          <DebugOverlay />
         </BrowserRouter>
       </LocationProvider>
     </AuthProvider>

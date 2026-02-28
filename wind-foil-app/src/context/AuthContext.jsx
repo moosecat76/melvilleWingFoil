@@ -1,5 +1,6 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
+import { migrateLocalStorageToFirestore } from '../services/dbService';
 import { auth, googleProvider } from '../services/firebaseSetup';
 
 const AuthContext = createContext();
@@ -9,8 +10,15 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+        const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
             if (firebaseUser) {
+                // Launch migration automatically on valid login and block UI until finished
+                try {
+                    await migrateLocalStorageToFirestore(firebaseUser.uid);
+                } catch (e) {
+                    console.error("Migration error:", e);
+                }
+
                 setUser({
                     uid: firebaseUser.uid,
                     displayName: firebaseUser.displayName,

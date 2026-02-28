@@ -19,7 +19,7 @@ const legacyCalculateStats = (streams, maxSpeedMs = 0, distanceMeters = 0) => {
 
 const SessionsPage = () => {
     const { currentLocation } = useLocation();
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const navigate = useNavigate();
     const [entries, setEntries] = useState([]);
     const [isAdding, setIsAdding] = useState(false);
@@ -29,16 +29,18 @@ const SessionsPage = () => {
 
     // Check Strava connection status
     useEffect(() => {
+        if (authLoading) return;
         const checkStrava = async () => {
             const su = await getStravaUser(user?.uid);
             setStravaConnected(!!su);
         };
         checkStrava();
-    }, [user?.uid]);
+    }, [user?.uid, authLoading]);
 
     // Gear state 
     const [userGear, setUserGear] = useState([]);
     useEffect(() => {
+        if (authLoading) return;
         const fetchGear = async () => {
             if (user?.uid) {
                 const { getUserGear } = await import('../services/dbService');
@@ -49,7 +51,7 @@ const SessionsPage = () => {
             }
         };
         fetchGear();
-    }, [user?.uid]);
+    }, [user?.uid, authLoading]);
 
     // Form State
     const [logDate, setLogDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -79,12 +81,13 @@ const SessionsPage = () => {
     };
 
     useEffect(() => {
+        if (authLoading) return;
         const fetchEntries = async () => {
             const data = await getJournalEntries(user?.uid);
             setEntries(data);
         }
         fetchEntries();
-    }, [currentLocation, user?.uid]);
+    }, [currentLocation, user?.uid, authLoading]);
 
     // Smart Fill Logic — uses weather data from localStorage if available
     const [weatherData, setWeatherData] = useState([]);

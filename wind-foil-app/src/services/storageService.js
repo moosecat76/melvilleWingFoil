@@ -4,7 +4,8 @@ const KEYS_TO_BACKUP = [
     'wind_foil_journal_entries',
     'locations',
     'currentLocationId',
-    'user_gear'
+    'user_gear',
+    'melvill_user_gear'
 ];
 
 export const exportData = () => {
@@ -43,7 +44,7 @@ export const importData = (file) => {
                         localStorage.setItem(key, backup[key]);
                     }
                 });
-                resolve({ success: true, count: Object.keys(backup).length });
+                resolve({ success: true, count: Object.keys(backup).length, data: backup });
             } catch (err) {
                 reject(err);
             }

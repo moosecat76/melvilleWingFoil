@@ -13,7 +13,7 @@ import LocationManager from '../components/LocationManager';
 import BestTime from '../components/BestTime';
 import { exportData, importData } from '../services/storageService';
 import { initiateStravaAuth, handleStravaCallback, getStravaUser, getActivities } from '../services/stravaService';
-import { migrateLocalStorageToFirestore, saveUserGear } from '../services/dbService';
+import { saveUserGear } from '../services/dbService';
 import { Download, Upload, Database, Activity } from 'lucide-react';
 
 const CustomArrowDot = (props) => {
@@ -53,6 +53,7 @@ const ForecastPage = () => {
     // Gear State
     const [userGear, setUserGear] = useState([]);
     useEffect(() => {
+        if (authLoading) return;
         const fetchGear = async () => {
             if (user?.uid) {
                 const { getUserGear } = await import('../services/dbService');
@@ -63,7 +64,7 @@ const ForecastPage = () => {
             }
         };
         fetchGear();
-    }, [user?.uid]);
+    }, [user?.uid, authLoading]);
 
     const handleSaveGear = async (items) => {
         setUserGear(items);
@@ -73,6 +74,9 @@ const ForecastPage = () => {
             localStorage.setItem('melvill_user_gear', JSON.stringify(items));
         }
     };
+
+    const [showGearSelector, setShowGearSelector] = useState(false);
+    const [unit, setUnit] = useState('knots');
 
     useEffect(() => {
         const fetchData = async () => {
@@ -115,13 +119,6 @@ const ForecastPage = () => {
         fetchData();
     }, [currentLocation]);
 
-    // Auto-migrate localStorage data on first login
-    useEffect(() => {
-        if (user?.uid) {
-            migrateLocalStorageToFirestore(user.uid).catch(console.error);
-        }
-    }, [user?.uid]);
-
     // Fetch Strava user on mount / user change
     useEffect(() => {
         const fetchStravaUser = async () => {
@@ -152,10 +149,16 @@ const ForecastPage = () => {
         const file = e.target.files[0];
         if (!file) return;
         try {
+            setLoading(true);
             const result = await importData(file);
+            if (user?.uid && result.data) {
+                const { restoreBackupToFirestore } = await import('../services/dbService');
+                await restoreBackupToFirestore(user.uid, result.data);
+            }
             alert(`Successfully restored! Reloading...`);
             window.location.reload();
         } catch (err) {
+            setLoading(false);
             alert('Failed to import data: ' + err.message);
         }
     };
