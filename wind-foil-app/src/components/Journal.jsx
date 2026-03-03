@@ -20,7 +20,7 @@ const legacyCalculateStats = (streams, maxSpeedMs = 0, distanceMeters = 0) => {
 
 const Journal = ({ weatherData, userGear = [], onAddGear }) => {
     const { currentLocation } = useLocation();
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const [entries, setEntries] = useState([]);
     const [isAdding, setIsAdding] = useState(false);
     const [editId, setEditId] = useState(null);
@@ -56,20 +56,22 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
 
     useEffect(() => {
         const fetchEntries = async () => {
+            if (authLoading) return;
             const data = await getJournalEntries(user?.uid);
             setEntries(data);
         };
         fetchEntries();
-    }, [currentLocation, user?.uid]);
+    }, [currentLocation, user?.uid, authLoading]);
 
     // Check Strava connection status
     useEffect(() => {
         const checkStrava = async () => {
+            if (authLoading) return;
             const su = await getStravaUser(user?.uid);
             setStravaConnected(!!su);
         };
         checkStrava();
-    }, [user?.uid]);
+    }, [user?.uid, authLoading]);
 
     // Smart Fill Logic
     useEffect(() => {

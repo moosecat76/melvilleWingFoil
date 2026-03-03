@@ -64,6 +64,9 @@ const SessionsPage = () => {
         windSpeed: '',
         windGusts: '',
         windDirection: '',
+        stravaActivityId: null,
+        mapPolyline: null,
+        streams: null,
         activityStats: null,
         foilAnalysis: null
     });
@@ -105,15 +108,15 @@ const SessionsPage = () => {
             date: new Date(`${logDate}T${logTime}`).toISOString(),
             notes: newEntry.notes,
             rating: parseInt(newEntry.rating),
-            gearUsed: newEntry.gearUsed,
-            windSpeed: newEntry.windSpeed,
-            windGusts: newEntry.windGusts,
-            windDirection: newEntry.windDirection,
-            stravaActivityId: newEntry.stravaActivityId,
-            mapPolyline: newEntry.mapPolyline,
-            streams: newEntry.streams,
-            activityStats: newEntry.activityStats,
-            foilAnalysis: newEntry.foilAnalysis
+            gearUsed: newEntry.gearUsed || '',
+            windSpeed: newEntry.windSpeed || '',
+            windGusts: newEntry.windGusts || '',
+            windDirection: newEntry.windDirection || '',
+            stravaActivityId: newEntry.stravaActivityId || null,
+            mapPolyline: newEntry.mapPolyline || null,
+            streams: newEntry.streams || null,
+            activityStats: newEntry.activityStats || null,
+            foilAnalysis: newEntry.foilAnalysis || null
         };
 
         try {
@@ -128,7 +131,7 @@ const SessionsPage = () => {
             }
 
             // Reset
-            setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '', stravaActivityId: null, mapPolyline: null, activityStats: null, foilAnalysis: null });
+            setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '', stravaActivityId: null, mapPolyline: null, streams: null, activityStats: null, foilAnalysis: null });
             setIsAdding(false);
             setEditId(null);
             setShowActivityPicker(false);

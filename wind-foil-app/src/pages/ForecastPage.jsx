@@ -121,15 +121,17 @@ const ForecastPage = () => {
 
     // Fetch Strava user on mount / user change
     useEffect(() => {
+        if (authLoading) return;
         const fetchStravaUser = async () => {
             const su = await getStravaUser(user?.uid);
             setStravaUser(su);
         };
         fetchStravaUser();
-    }, [user?.uid]);
+    }, [user?.uid, authLoading]);
 
     // Check for Strava Callback
     useEffect(() => {
+        if (authLoading) return;
         const params = new URLSearchParams(window.location.search);
         const code = params.get('code');
         if (code) {
@@ -143,7 +145,7 @@ const ForecastPage = () => {
                 alert('Failed to connect Strava');
             });
         }
-    }, [user?.uid]);
+    }, [user?.uid, authLoading]);
 
     const handleImport = async (e) => {
         const file = e.target.files[0];
