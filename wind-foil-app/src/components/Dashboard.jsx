@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { Wind, Navigation, Calendar, ThumbsUp, ThumbsDown, ArrowUp, AlertTriangle, Anchor, Waves } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, ComposedChart, ReferenceLine, ReferenceArea, Label, Customized } from 'recharts';
-import { getWeatherForecast, getTideForecast, getActualWeather, processChartData } from '../services/weatherService';
+import { getWeatherForecast, getTideForecast, getActualWeather, processChartData, processTodayChartData } from '../services/weatherService';
 import { getWindRating, getGearRecommendation } from '../services/recommendationService';
 import { useLocation } from '../context/LocationContext';
 import { useAuth } from '../context/AuthContext';
@@ -13,6 +13,7 @@ import GearSelector from './GearSelector';
 import LocationManager from './LocationManager';
 import Journal from './Journal';
 import BestTime from './BestTime';
+import TodayForecastChart from './TodayForecastChart';
 import { exportData, importData } from '../services/storageService';
 import { initiateStravaAuth, handleStravaCallback, getStravaUser, getActivities } from '../services/stravaService';
 import { Download, Upload, Database, Activity } from 'lucide-react';
@@ -46,6 +47,7 @@ const Dashboard = () => {
     const [stravaUser, setStravaUser] = useState(null);
 
     const [data, setData] = useState([]);
+    const [todayData, setTodayData] = useState([]);
     const [daily, setDaily] = useState(null);
     const [current, setCurrent] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -111,6 +113,11 @@ const Dashboard = () => {
                         setCurrent(closest);
                     }
                 }
+
+                // Process today's data using the new helper
+                const rawActualForToday = actualWeather ? actualWeather : { historical: [] };
+                const processedToday = processTodayChartData(processed, rawActualForToday);
+                setTodayData(processedToday);
             } catch (err) {
                 console.error(err);
                 setError('Failed to load weather data.');
@@ -202,6 +209,20 @@ const Dashboard = () => {
             chartSpeed: Number(s.toFixed(1)),
             chartGusts: Number(g.toFixed(1))
         };
+    });
+
+    const todayChartData = todayData.map(d => {
+        const s = (unit === 'knots' ? (d.speed || 0) * 0.539957 : (d.speed || 0));
+        const g = (unit === 'knots' ? (d.gusts || 0) * 0.539957 : (d.gusts || 0));
+        const aS = (unit === 'knots' ? (d.actualSpeed || 0) * 0.539957 : (d.actualSpeed || 0));
+        const aG = (unit === 'knots' ? (d.actualGusts || 0) * 0.539957 : (d.actualGusts || 0));
+        return {
+            ...d,
+            chartSpeed: Number(s.toFixed(1)),
+            chartGusts: Number(g.toFixed(1)),
+            actualSpeed: d.actualSpeed != null ? Number(aS.toFixed(1)) : null,
+            actualGusts: d.actualGusts != null ? Number(aG.toFixed(1)) : null,
+        }
     });
 
     console.log('Chart Data Ready:', chartData.length, 'points');
@@ -354,6 +375,9 @@ const Dashboard = () => {
                     }}
                 />
 
+                {/* Today's Forecast vs Actual */}
+                <TodayForecastChart data={todayChartData} unitLabel={unitLabel} />
+
                 {/* Main Chart */}
                 <div className="glass-panel" style={{ padding: '2rem', height: '400px' }}>
                     <h3 className="card-title">7-Day Forecast (Arrows show direction)</h3>
@@ -505,7 +529,7 @@ const Dashboard = () => {
 
                 <div className="glass-panel" style={{ padding: '2rem' }}>
                     <h3 className="card-title">Launch Location</h3>
-                    <MapComponent lat={currentLocation.latitude} lng={currentLocation.longitude} name={currentLocation.name} />
+                    <MapComponent lat={currentLocation.latitude} lng={currentLocation.longitude} name={currentLocation.name} windDirection={current?.direction} />
                 </div>
 
                 {/* Data Management Section */}

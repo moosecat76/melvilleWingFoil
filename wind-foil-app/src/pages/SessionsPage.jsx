@@ -7,6 +7,7 @@ import { format } from 'date-fns';
 import { getActivities, getStravaUser, getActivityStreams } from '../services/stravaService';
 import { analyzeSession } from '../services/foilAnalysisService';
 import { useNavigate } from 'react-router-dom';
+import { getWeatherForecast, getTideForecast, processChartData } from '../services/weatherService';
 
 const SessionMap = lazy(() => import('../components/SessionMap'));
 const FoilAnalysisChart = lazy(() => import('../components/FoilAnalysisChart'));
@@ -92,12 +93,50 @@ const SessionsPage = () => {
         fetchEntries();
     }, [currentLocation, user?.uid, authLoading]);
 
-    // Smart Fill Logic — uses weather data from localStorage if available
+    // Smart Fill Logic — uses weather data (last 7 days history from Open-Meteo)
     const [weatherData, setWeatherData] = useState([]);
     useEffect(() => {
-        // We don't have weatherData prop anymore, so skip smart-fill for now
-        // In future, could share via context or localStorage
-    }, [logDate, logTime, isAdding]);
+        if (!isAdding || weatherData.length > 0) return;
+        const fetchWeather = async () => {
+            try {
+                const rawData = await getWeatherForecast(currentLocation.latitude, currentLocation.longitude);
+                const tideData = await getTideForecast(currentLocation.latitude, currentLocation.longitude);
+                const processed = processChartData(rawData, tideData);
+                setWeatherData(processed);
+            } catch (err) {
+                console.warn('Failed to fetch weather data for smart-fill', err);
+            }
+        };
+        fetchWeather();
+    }, [isAdding, currentLocation]);
+
+    const findWeatherForTime = (targetDate, currentWeatherData) => {
+        if (!currentWeatherData || currentWeatherData.length === 0) return null;
+        
+        // Find closest weather data point
+        const closest = currentWeatherData.reduce((prev, curr) =>
+            Math.abs(curr.rawDate - targetDate) < Math.abs(prev.rawDate - targetDate) ? curr : prev
+        );
+
+        // Within 3 hours
+        return (closest && Math.abs(closest.rawDate - targetDate) < 3 * 60 * 60 * 1000) ? closest : null;
+    };
+
+    useEffect(() => {
+        if (!isAdding || editId || !weatherData || weatherData.length === 0) return;
+
+        const target = new Date(`${logDate}T${logTime}`);
+        const closest = findWeatherForTime(target, weatherData);
+
+        if (closest) {
+            setNewEntry(prev => ({
+                ...prev,
+                windSpeed: (closest.speed * 0.539957).toFixed(1),
+                windGusts: (closest.gusts * 0.539957).toFixed(1),
+                windDirection: closest.direction
+            }));
+        }
+    }, [logDate, logTime, isAdding, weatherData, editId]);
 
     const handleAdd = async (e) => {
         e.preventDefault();
@@ -202,8 +241,20 @@ const SessionsPage = () => {
         const basicStats = legacyCalculateStats(streams, activity.max_speed, activity.distance);
         const analysis = analyzeSession(streams);
 
+        // Wind refill logic (explicit on selection)
+        let weatherUpdates = {};
+        const closest = findWeatherForTime(date, weatherData);
+        if (closest) {
+            weatherUpdates = {
+                windSpeed: (closest.speed * 0.539957).toFixed(1),
+                windGusts: (closest.gusts * 0.539957).toFixed(1),
+                windDirection: closest.direction
+            };
+        }
+
         setNewEntry(prev => ({
             ...prev,
+            ...weatherUpdates,
             stravaActivityId: activity.id,
             mapPolyline: activity.map?.summary_polyline,
             streams: streams,

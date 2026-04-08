@@ -23,7 +23,7 @@ export const getWeatherForecast = async (lat = DEFAULT_COORDS.latitude, lon = DE
                 longitude: lon,
                 hourly: 'wind_speed_10m,wind_direction_10m,wind_gusts_10m,temperature_2m',
                 timezone: 'auto',
-                past_days: 1,      // 24h history (approx)
+                past_days: 7,      // 7 days history (approx)
                 forecast_days: 7,  // 7 days look ahead
                 daily: 'sunrise,sunset', // Request daylight info
             },
@@ -56,31 +56,33 @@ export const getTideForecast = async (lat = DEFAULT_COORDS.latitude, lon = DEFAU
 
 export const getActualWeather = async (lat = DEFAULT_COORDS.latitude, lon = DEFAULT_COORDS.longitude) => {
     // Only use BOM if we are at the default location (Melville), otherwise strictly use Open-Meteo
-    // This is a simplification. Ideally we'd map locations to BOM stations, but for now this prevents errors.
     const isDefaultLocation = Math.abs(lat - DEFAULT_COORDS.latitude) < 0.0001 && Math.abs(lon - DEFAULT_COORDS.longitude) < 0.0001;
+
+    let historicalActuals = [];
 
     if (isDefaultLocation) {
         try {
-            // Attempt to fetch BOM data
-            // Using a simple CORS-anywhere proxy if running locally, or direct if possible.
-            // For reliability in this demo, we might fallback if it fails.
             const response = await axios.get(BOM_JSON_URL);
             const observations = response.data.observations.data;
 
-            // Find the latest observation
             if (observations && observations.length > 0) {
-                const latest = observations[0];
+                // Map all observations to a consistent format
+                historicalActuals = observations.map(obs => ({
+                    time: new Date(obs.local_date_time_full),
+                    speed: obs.wind_spd_kmh,
+                    direction: obs.wind_dir_deg, // Use degrees if available, fallback handled in process
+                    gusts: obs.gust_kmh,
+                    temp: obs.air_temp
+                }));
+
+                const latest = historicalActuals[0];
                 return {
-                    time: new Date(latest.local_date_time_full),
-                    speed: latest.wind_spd_kmh,
-                    direction: latest.wind_dir,
-                    gusts: latest.gust_kmh,
-                    temp: latest.air_temp
+                    ...latest,
+                    historical: historicalActuals
                 };
             }
         } catch (error) {
             console.warn('BOM Fetch failed (likely CORS). Falling back to Open-Meteo Current.');
-            // Fall through to Open-Meteo
         }
     }
 
@@ -99,7 +101,8 @@ export const getActualWeather = async (lat = DEFAULT_COORDS.latitude, lon = DEFA
             time: new Date(),
             speed: current.wind_speed_10m,
             direction: current.wind_direction_10m,
-            gusts: current.wind_gusts_10m
+            gusts: current.wind_gusts_10m,
+            historical: [] // For now, Open-Meteo fallback doesn't populate historical actuals easily without another call
         };
     } catch (e) {
         console.error(e);
@@ -123,7 +126,7 @@ export const processChartData = (data, tideData) => {
         const date = new Date(t);
         const isFuture = isAfter(date, now);
 
-        // Robust day start detection (check if current date string is different from previous)
+        // Robust day start detection
         const prevT = index > 0 ? time[index - 1] : null;
         const isDayStart = index === 0 || format(date, 'yyyy-MM-dd') !== format(new Date(prevT), 'yyyy-MM-dd');
 
@@ -145,7 +148,53 @@ export const processChartData = (data, tideData) => {
             // Helper for UI styling (dashed vs solid)
             isForecast: isFuture,
             isDayStart: isDayStart,
-            isNoon: date.getHours() === 12, // Still useful for centering day labels
+            isNoon: date.getHours() === 12,
+        };
+    });
+};
+
+/**
+ * Specifically for the "Today" chart: merges forecast and actual historical data.
+ */
+export const processTodayChartData = (forecastData, actualData) => {
+    if (!forecastData || forecastData.length === 0) return [];
+
+    // Filter forecast for Today (+/- 24h roughly)
+    const now = new Date();
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const endOfToday = new Date(startOfToday);
+    endOfToday.setDate(endOfToday.getDate() + 1);
+    endOfToday.setHours(23, 59, 59, 999);
+
+    // We take the forecast for the next 24-48 hours from start of today to ensure we cover the full day
+    const todayForecast = forecastData.filter(d => {
+        const dDate = new Date(d.time);
+        return dDate >= startOfToday && dDate <= endOfToday;
+    });
+
+    const historical = actualData?.historical || [];
+
+    return todayForecast.map(f => {
+        // Find actual data point closest to this forecast hour
+        const fTime = f.time;
+        // BOM historical points are every 30 mins usually
+        const closestActual = historical.reduce((prev, curr) => {
+            if (!prev) return curr;
+            const prevDiff = Math.abs(new Date(prev.time).getTime() - fTime);
+            const currDiff = Math.abs(new Date(curr.time).getTime() - fTime);
+            return currDiff < prevDiff ? curr : prev;
+        }, null);
+
+        // Only use actual if it's within 45 mins of the hour
+        const hasActual = closestActual && Math.abs(new Date(closestActual.time).getTime() - fTime) < 45 * 60 * 1000;
+
+        return {
+            ...f,
+            actualSpeed: hasActual ? closestActual.speed : null,
+            actualGusts: hasActual ? closestActual.gusts : null,
+            actualDirection: hasActual ? closestActual.direction : null,
         };
     });
 };
