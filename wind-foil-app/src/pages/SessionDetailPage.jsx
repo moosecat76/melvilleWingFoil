@@ -15,6 +15,7 @@ const SessionDetailPage = () => {
     const { user } = useAuth();
     const [entry, setEntry] = useState(null);
     const [analysis, setAnalysis] = useState(null);
+    const [hoveredIndex, setHoveredIndex] = useState(null);
 
     useEffect(() => {
         const fetchEntries = async () => {
@@ -158,7 +159,7 @@ const SessionDetailPage = () => {
                 <div className="glass-panel" style={{ padding: '16px', marginBottom: '1.5rem' }}>
                     <h3 style={{ margin: '0 0 12px 0', fontSize: '1rem', fontWeight: 600 }}>Session Track</h3>
                     <Suspense fallback={<div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading map...</div>}>
-                        <SessionMap summary_polyline={entry.mapPolyline} streams={entry.streams} />
+                        <SessionMap summary_polyline={entry.mapPolyline} streams={entry.streams} highlightIndex={hoveredIndex} />
                     </Suspense>
                 </div>
             )}
@@ -167,7 +168,7 @@ const SessionDetailPage = () => {
             {analysis && (
                 <div className="glass-panel" style={{ padding: '16px', marginBottom: '1.5rem' }}>
                     <Suspense fallback={<div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading chart...</div>}>
-                        <FoilAnalysisChart analysisData={analysis} />
+                        <FoilAnalysisChart analysisData={analysis} onHover={setHoveredIndex} />
                     </Suspense>
                 </div>
             )}

@@ -1,6 +1,6 @@
 
 import React, { useEffect } from 'react';
-import { MapContainer, TileLayer, Polyline, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, Marker, Popup, CircleMarker } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -54,7 +54,7 @@ const decodePolyline = (str, precision) => {
 
 
 
-const SessionMap = ({ polyline, summary_polyline, streams }) => {
+const SessionMap = ({ polyline, summary_polyline, streams, highlightIndex }) => {
     const encoded = polyline || summary_polyline;
 
     // Helper to render simple map (for fallback or no streams)
@@ -114,17 +114,44 @@ const SessionMap = ({ polyline, summary_polyline, streams }) => {
             cranking: []  // > 2 m/s
         };
 
-        for (let i = 1; i < latlngStream.length; i++) {
-            const p1 = latlngStream[i - 1];
-            const p2 = latlngStream[i];
-            const speedMs = (velocityStream[i - 1] + velocityStream[i]) / 2;
-            const segment = [p1, p2];
+        // Maintain continuous lines for each bucket to massively reduce DOM node generation.
+        // Instead of thousands of tiny 2-point polylines, we generate one polyline per continuous speed block.
+        let currentBucket = null;
+        let currentPath = [];
 
-            if (speedMs < 0.2) buckets.stopped.push(segment);
-            else if (speedMs < 0.8) buckets.crawl.push(segment);
-            else if (speedMs < 1) buckets.planing.push(segment);
-            else if (speedMs < 2) buckets.foil.push(segment);
-            else buckets.cranking.push(segment);
+        // Downsample slightly for the map if it's huge, but continuous lines handle it nicely.
+        // We will sample every 2nd point to half the array size, reducing path length.
+        const MAP_SAMPLE_RATE = Math.max(1, Math.ceil(latlngStream.length / 1500)); 
+
+        for (let i = MAP_SAMPLE_RATE; i < latlngStream.length; i += MAP_SAMPLE_RATE) {
+            const p1 = latlngStream[i - MAP_SAMPLE_RATE];
+            const p2 = latlngStream[i];
+            const speedMs = (velocityStream[i - MAP_SAMPLE_RATE] + velocityStream[i]) / 2;
+            
+            let bucketName;
+            if (speedMs < 0.2) bucketName = 'stopped';
+            else if (speedMs < 0.8) bucketName = 'crawl';
+            else if (speedMs < 1) bucketName = 'planing';
+            else if (speedMs < 2) bucketName = 'foil';
+            else bucketName = 'cranking';
+
+            if (bucketName !== currentBucket) {
+                // Save the old path if it exists
+                if (currentBucket && currentPath.length > 0) {
+                    buckets[currentBucket].push([...currentPath]);
+                }
+                // Start a new path (overlapping the previous point slightly for continuity)
+                currentBucket = bucketName;
+                currentPath = [p1, p2];
+            } else {
+                // Continue the line
+                currentPath.push(p2);
+            }
+        }
+        
+        // Push final path
+        if (currentBucket && currentPath.length > 0) {
+            buckets[currentBucket].push([...currentPath]);
         }
 
         const start = latlngStream[0];
@@ -132,6 +159,7 @@ const SessionMap = ({ polyline, summary_polyline, streams }) => {
 
         // Calculate bounds
         const bounds = latlngStream;
+        const highlightPoint = highlightIndex != null && latlngStream[highlightIndex] ? latlngStream[highlightIndex] : null;
 
         return (
             <div style={{ height: '300px', width: '100%', borderRadius: '8px', overflow: 'hidden', marginTop: '1rem', position: 'relative' }}>
@@ -150,6 +178,14 @@ const SessionMap = ({ polyline, summary_polyline, streams }) => {
 
                     <Marker position={start}><Popup>Start</Popup></Marker>
                     <Marker position={end}><Popup>End</Popup></Marker>
+
+                    {highlightPoint && (
+                        <CircleMarker 
+                            center={highlightPoint} 
+                            radius={6} 
+                            pathOptions={{ color: '#ffffff', fillColor: '#38bdf8', fillOpacity: 1, weight: 2 }} 
+                        />
+                    )}
 
                     {/* Legend Overlay */}
                     <div className="leaflet-bottom leaflet-right" style={{ pointerEvents: 'none', margin: '10px', marginBottom: '20px' }}>

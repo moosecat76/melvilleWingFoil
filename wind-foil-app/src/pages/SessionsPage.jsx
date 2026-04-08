@@ -58,6 +58,8 @@ const SessionsPage = () => {
     const [logDate, setLogDate] = useState(format(new Date(), 'yyyy-MM-dd'));
     const [logTime, setLogTime] = useState(format(new Date(), 'HH:mm'));
 
+    const [hoveredIndex, setHoveredIndex] = useState(null);
+
     const [newEntry, setNewEntry] = useState({
         notes: '',
         rating: 5,
@@ -508,7 +510,7 @@ const SessionsPage = () => {
                                             </div>
                                             {newEntry.mapPolyline ? (
                                                 <Suspense fallback={<div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading map...</div>}>
-                                                    <SessionMap summary_polyline={newEntry.mapPolyline} streams={newEntry.streams} />
+                                                    <SessionMap summary_polyline={newEntry.mapPolyline} streams={newEntry.streams} highlightIndex={hoveredIndex} />
                                                 </Suspense>
                                             ) : (
                                                 <div style={{ padding: '20px', textAlign: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', color: 'var(--text-secondary)' }}>
@@ -519,7 +521,7 @@ const SessionsPage = () => {
                                             {newEntry.foilAnalysis && (
                                                 <div style={{ marginTop: '20px' }}>
                                                     <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading chart...</div>}>
-                                                        <FoilAnalysisChart analysisData={newEntry.foilAnalysis} />
+                                                        <FoilAnalysisChart analysisData={newEntry.foilAnalysis} onHover={setHoveredIndex} />
                                                     </Suspense>
                                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '8px', marginTop: '12px' }}>
                                                         <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>

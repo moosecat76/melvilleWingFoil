@@ -39,60 +39,77 @@ export const analyzeSession = (streams) => {
         return null; // Cannot analyze without core data
     }
 
-    // 2. Calibration (Dynamic Baseline)
-    // "Average of the first 10 seconds"
-    // Assuming 1hz data for simplicity, or using time stream if available.
-    // Strava streams are usually 1 datapoint per second, but let's be safe.
-    let baselineAltitude = 0;
-    let calibrationPoints = 0;
+    // 2. Dynamic Calibration & Point-by-Point Detection
+    const dynamicBaseline = new Array(timeStream.length).fill(0);
+    const pointStates = new Array(timeStream.length).fill('sailing'); // 'foiling', 'sailing', 'beach'
 
-    for (let i = 0; i < timeStream.length; i++) {
-        if (timeStream[i] - timeStream[0] <= 10) {
-            baselineAltitude += altitudeStream[i];
-            calibrationPoints++;
-        } else {
-            break;
-        }
-    }
-
-    baselineAltitude = calibrationPoints > 0 ? baselineAltitude / calibrationPoints : altitudeStream[0];
-
-    // 3. Detection
-    const foilSegments = [];
-    let currentSegment = null;
-    let potentialStart = -1;
+    let lastKnownWaterLevel = altitudeStream[0];
+    const WATER_LEVEL_WINDOW = 60; // 60s moving window for water level
+    const waterLevelBuffer = [];
 
     // Constants
     const PLANNING_SPEED = 0.8; // m/s
-    const LIFT_THRESHOLD = 0.2; // m (lower than baseline)
+    const STALL_SPEED = 0.4; // m/s (can stay on foil if speed drops a bit but alt is good)
+    const LIFT_THRESHOLD = 0.2; // m (numerical drop = lift)
+    const BEACH_THRESHOLD = 0.8; // m (significant numerical rise = beach/walking)
     const PERSISTENCE_SECONDS = 2;
 
-    // Helper to check if a point is "On Foil" candidates
-    const isFoilCandidate = (i) => {
+    const foilSegments = [];
+    let currentSegment = null;
+    let potentialStart = -1;
+    let isCurrentlyFoiling = false;
+
+    for (let i = 0; i < timeStream.length; i++) {
         const speed = velocityStream[i];
         const alt = altitudeStream[i];
 
-        // "Altitude is at least 0.2m LOWER than baseline (indicating physical lift)"
-        // Note: As discussed, we assume sensor measures distance-to-water or similar where DROP = LIFT.
-        // OR standard barometric where UP = UP. 
-        // Logic requested: "lower than baseline". 
-        // e.g. Baseline 4.2. Lift if Alt < 4.0.
-        const hasLift = alt < (baselineAltitude - LIFT_THRESHOLD);
+        // Track water level only when moving slowly (e.g., drifting, not foiling)
+        if (speed < 0.5 && !isCurrentlyFoiling) {
+            waterLevelBuffer.push(alt);
+            if (waterLevelBuffer.length > WATER_LEVEL_WINDOW) {
+                waterLevelBuffer.shift();
+            }
+            if (waterLevelBuffer.length > 0) {
+                lastKnownWaterLevel = waterLevelBuffer.reduce((a, b) => a + b, 0) / waterLevelBuffer.length;
+            }
+        }
+        dynamicBaseline[i] = lastKnownWaterLevel;
 
-        return speed > PLANNING_SPEED && hasLift;
-    };
+        // Determine state for this point
+        const currentBaseline = dynamicBaseline[i];
+        
+        // Beach detection: if altitude numerical value rises significantly (could be walking, or GPS drift)
+        // Adjust depending on if sensor is inverted. Fall-in = peak. So let's classify extreme peaks as beach/break
+        if (alt > currentBaseline + BEACH_THRESHOLD || alt < currentBaseline - BEACH_THRESHOLD * 2) {
+            pointStates[i] = 'beach';
+        }
 
-    // Iterate
-    for (let i = 0; i < timeStream.length; i++) {
-        if (isFoilCandidate(i)) {
+        // Foiling Candidates
+        // numerical drop = lift. 
+        const hasLift = alt < (currentBaseline - LIFT_THRESHOLD);
+        
+        let shouldBeFoiling = false;
+        if (!isCurrentlyFoiling) {
+            // To start foiling, need planning speed and lift
+            if (speed > PLANNING_SPEED && hasLift && pointStates[i] !== 'beach') {
+                shouldBeFoiling = true;
+            }
+        } else {
+            // To stay on foil, can drop to stall speed as long as lift is maintained
+            if (speed > STALL_SPEED && hasLift && pointStates[i] !== 'beach') {
+                shouldBeFoiling = true;
+            }
+        }
+
+        if (shouldBeFoiling) {
+            pointStates[i] = 'foiling';
             if (potentialStart === -1) {
                 potentialStart = i;
             }
 
-            // If we have a potential start, check persistence
             const durationSoFar = timeStream[i] - timeStream[potentialStart];
-
             if (durationSoFar >= PERSISTENCE_SECONDS) {
+                isCurrentlyFoiling = true;
                 if (!currentSegment) {
                     currentSegment = { start: potentialStart, end: i };
                 } else {
@@ -106,12 +123,14 @@ export const analyzeSession = (streams) => {
                 currentSegment = null;
             }
             potentialStart = -1;
+            isCurrentlyFoiling = false;
         }
     }
-    // Close last segment if active
+
     if (currentSegment) {
         foilSegments.push(currentSegment);
     }
+
 
     // 4. Calculate Stats
     let totalFoilTimeSeconds = 0;
@@ -152,7 +171,9 @@ export const analyzeSession = (streams) => {
     }
 
     return {
-        baselineAltitude,
+        baselineAltitude: dynamicBaseline[0] || 0, // Fallback for UI if needed
+        dynamicBaseline,
+        pointStates,
         foilSegments,
         stats: {
             totalFoilTime: (totalFoilTimeSeconds / 60).toFixed(1), // minutes

@@ -2,20 +2,43 @@
 import React from 'react';
 import { ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea, ReferenceLine } from 'recharts';
 
-const FoilAnalysisChart = ({ analysisData }) => {
+const CustomTooltip = ({ active, payload }) => {
+    if (active && payload && payload.length) {
+        const data = payload[0].payload;
+        return (
+            <div style={{ backgroundColor: '#1e293b', padding: '10px', border: '1px solid #334155', color: '#f8fafc', borderRadius: '4px', fontSize: '12px' }}>
+                <p style={{ margin: '0 0 5px 0', color: '#94a3b8' }}>{Math.floor(data.time / 60)}m {Math.round(data.time % 60)}s</p>
+                <p style={{ margin: '0 0 2px 0' }}>Speed: <strong style={{color: '#8884d8'}}>{data.speed.toFixed(2)} m/s</strong></p>
+                <p style={{ margin: '0 0 2px 0' }}>Altitude: <strong style={{color: '#82ca9d'}}>{data.altitude.toFixed(2)} m</strong></p>
+                <p style={{ margin: 0 }}>State: <strong style={{color: data.state === 'beach' ? '#f87171' : data.state === 'foiling' ? '#4ade80' : '#fbbf24'}}>{data.state.charAt(0).toUpperCase() + data.state.slice(1)}</strong></p>
+            </div>
+        );
+    }
+    return null;
+};
+
+const FoilAnalysisChart = ({ analysisData, onHover }) => {
     if (!analysisData) return null;
 
-    const { data, foilSegments, baselineAltitude } = analysisData;
+    const { data, foilSegments, baselineAltitude, dynamicBaseline, pointStates } = analysisData;
     const { velocity, altitude, time } = data;
 
-    // Prepare chart data
-    // downsampling for performance if needed, but for now map 1:1
-    const chartData = time.map((t, i) => ({
-        time: t,
-        timeMin: (t / 60).toFixed(2), // formatted for X-Axis
-        speed: velocity[i],
-        altitude: altitude[i]
-    }));
+    // Prepare chart data - downsample to greatly improve JS rendering performance
+    const targetPoints = 500;
+    const samplingRate = Math.max(1, Math.ceil(time.length / targetPoints));
+    
+    const chartData = [];
+    for (let i = 0; i < time.length; i += samplingRate) {
+        chartData.push({
+            originalIndex: i,
+            time: time[i],
+            timeMin: (time[i] / 60).toFixed(2), // formatted for X-Axis
+            speed: velocity[i],
+            altitude: altitude[i],
+            baseline: dynamicBaseline ? dynamicBaseline[i] : baselineAltitude,
+            state: pointStates ? pointStates[i] : 'sailing'
+        });
+    }
 
     // Calculate domain for Altitude to make sure it looks good inverted
     // Inverted means: Lower values (flight) are HIGHER on the screen.
@@ -30,7 +53,17 @@ const FoilAnalysisChart = ({ analysisData }) => {
         <div style={{ width: '100%', height: 400, background: 'rgba(0,0,0,0.2)', borderRadius: '8px', padding: '10px' }}>
             <h4 style={{ margin: '0 0 10px 0', color: 'var(--text-secondary)' }}>Flight Analysis</h4>
             <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={chartData}>
+                <ComposedChart 
+                    data={chartData}
+                    onMouseMove={(e) => {
+                        if (e && e.activeTooltipIndex !== undefined && onHover) {
+                            onHover(chartData[e.activeTooltipIndex].originalIndex);
+                        }
+                    }}
+                    onMouseLeave={() => {
+                        if (onHover) onHover(null);
+                    }}
+                >
                     <CartesianGrid strokeDasharray="3 3" opacity={0.1} vertical={false} />
 
                     <XAxis
@@ -61,14 +94,10 @@ const FoilAnalysisChart = ({ analysisData }) => {
                         fontSize={12}
                     />
 
-                    <Tooltip
-                        contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', color: '#f8fafc' }}
-                        formatter={(value, name) => [value.toFixed(2), name]}
-                        labelFormatter={(label) => `${Math.floor(label / 60)}m ${Math.round(label % 60)}s`}
-                    />
+                    <Tooltip content={<CustomTooltip />} />
 
-                    {/* Baseline Reference */}
-                    <ReferenceLine y={baselineAltitude} yAxisId="altitude" stroke="#82ca9d" strokeDasharray="5 5" label="Base" />
+                    {/* Dynamic Baseline replacing static ReferenceLine */}
+                    <Line yAxisId="altitude" type="monotone" dataKey="baseline" stroke="#82ca9d" strokeDasharray="5 5" dot={false} strokeWidth={1} name="Base" />
 
                     {/* Foil Segments Background Overlay */}
                     {foilSegments.map((seg, idx) => (
