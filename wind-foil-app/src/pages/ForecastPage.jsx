@@ -189,15 +189,21 @@ const ForecastPage = () => {
     const displayedGusts = formatSpeed(current?.gusts);
     const unitLabel = unit === 'knots' ? 'kts' : 'km/h';
 
-    const chartData = data.map(d => {
-        const s = (unit === 'knots' ? (d.speed || 0) * 0.539957 : (d.speed || 0));
-        const g = (unit === 'knots' ? (d.gusts || 0) * 0.539957 : (d.gusts || 0));
-        return {
-            ...d,
-            chartSpeed: Number(s.toFixed(1)),
-            chartGusts: Number(g.toFixed(1))
-        };
-    });
+    const oneDayAgo = new Date();
+    oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+    oneDayAgo.setHours(0, 0, 0, 0); // start of yesterday
+
+    const chartData = data
+        .filter(d => d.rawDate >= oneDayAgo)
+        .map(d => {
+            const s = (unit === 'knots' ? (d.speed || 0) * 0.539957 : (d.speed || 0));
+            const g = (unit === 'knots' ? (d.gusts || 0) * 0.539957 : (d.gusts || 0));
+            return {
+                ...d,
+                chartSpeed: Number(s.toFixed(1)),
+                chartGusts: Number(g.toFixed(1))
+            };
+        });
 
     const getRatingIcon = (ratingVal) => {
         if (ratingVal <= 1) return <ThumbsDown />;
