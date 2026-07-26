@@ -1,4 +1,4 @@
-﻿
+
 import { getStravaTokens, saveStravaTokens, deleteStravaTokens } from './dbService';
 
 const STRAVA_CLIENT_ID = import.meta.env.VITE_STRAVA_CLIENT_ID || '';
@@ -97,6 +97,23 @@ export const handleStravaCallback = async (code, uid, explicitScope = '') => {
         if (!data.access_token) {
             throw new Error(data.message || 'No access token received from Strava');
         }
+
+        // --- IMMEDIATE VERIFICATION ---
+        console.log('[Strava] Verifying newly minted token has activity read scope...');
+        const verifyResponse = await fetch('https://www.strava.com/api/v3/athlete/activities?per_page=1', {
+            headers: { 'Authorization': `Bearer ${data.access_token}` }
+        });
+        console.log('[Strava] Immediate Activity scope verification status:', verifyResponse.status);
+
+        if (!verifyResponse.ok) {
+            const verifyErr = await verifyResponse.json().catch(() => ({}));
+            console.error('[Strava] NEW Token FAILED activity scope check:', verifyErr);
+            throw new Error(
+                `Your newly generated Strava token is STILL missing activity read permission (${verifyResponse.status}). ` +
+                'This means Strava is denying the scope despite you checking the boxes. Please check your Strava App configuration.'
+            );
+        }
+        // ------------------------------
 
         const effectiveScope = grantedScope || 'activity:read_all';
         saveTokenLocal(data, effectiveScope);
