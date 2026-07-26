@@ -14,7 +14,7 @@ export const initiateStravaAuth = () => {
     }
     const scope = 'activity:read_all,activity:read,read';
     const authUrl = `https://www.strava.com/oauth/authorize?client_id=${STRAVA_CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&approval_prompt=force&scope=${scope}`;
-    console.log('[Strava] Initiating auth, redirect_uri:', REDIRECT_URI);
+    console.log('[Strava] Initiating auth. client_id:', STRAVA_CLIENT_ID, '| redirect_uri:', REDIRECT_URI);
     window.location.href = authUrl;
 };
 
@@ -28,6 +28,48 @@ export const disconnectStrava = async (uid) => {
     if (uid) {
         await deleteStravaTokens(uid);
     }
+};
+
+/**
+ * Exchange the OAuth code for tokens.
+ * On Vercel: calls the /api/strava-token serverless function (server-side, secret secure).
+ * On localhost: falls back to direct Strava call (dev only).
+ */
+const exchangeCodeForToken = async (code) => {
+    const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+    if (!isLocalDev) {
+        // Production: use our Vercel serverless function
+        console.log('[Strava] Using server-side token exchange via /api/strava-token');
+        const apiResponse = await fetch('/api/strava-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code })
+        });
+        const data = await apiResponse.json();
+        if (!apiResponse.ok) {
+            throw new Error(data.error || data.message || `Token exchange failed (${apiResponse.status})`);
+        }
+        return data;
+    }
+
+    // Local dev fallback: call Strava directly
+    console.log('[Strava] Using client-side token exchange (local dev)');
+    const response = await fetch('https://www.strava.com/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            client_id: STRAVA_CLIENT_ID,
+            client_secret: STRAVA_CLIENT_SECRET,
+            code: code,
+            grant_type: 'authorization_code'
+        })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+        throw new Error(data.message || `Token exchange failed (${response.status})`);
+    }
+    return data;
 };
 
 export const handleStravaCallback = async (code, uid, explicitScope = '') => {
@@ -45,60 +87,31 @@ export const handleStravaCallback = async (code, uid, explicitScope = '') => {
         if (grantedScope && !grantedScope.includes('activity:read')) {
             console.warn('[Strava] Scope check FAILED - missing activity:read in:', grantedScope);
             throw new Error(
-                'Activity permissions were not granted. On the Strava authorization screen, please make sure the "View data about your activities" checkbox is checked before clicking Authorize.'
+                'Activity permissions were not granted on Strava. Please check the "View data about your activities" box when authorizing.'
             );
         }
 
-        console.log('[Strava] Exchanging code for token...');
-        const response = await fetch('https://www.strava.com/oauth/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                client_id: STRAVA_CLIENT_ID,
-                client_secret: STRAVA_CLIENT_SECRET,
-                code: code,
-                grant_type: 'authorization_code'
-            })
-        });
-        const data = await response.json();
-        console.log('[Strava] Token exchange response status:', response.status, '| has access_token:', !!data.access_token);
+        const data = await exchangeCodeForToken(code);
+        console.log('[Strava] Token exchange success. has access_token:', !!data.access_token, '| athlete:', data.athlete?.firstname);
 
-        if (response.ok && data.access_token) {
-            // Immediately verify the token can actually read activities
-            console.log('[Strava] Verifying token has activity read scope...');
-            const verifyResponse = await fetch('https://www.strava.com/api/v3/athlete/activities?per_page=1', {
-                headers: { 'Authorization': `Bearer ${data.access_token}` }
-            });
-            console.log('[Strava] Activity scope verification status:', verifyResponse.status);
-
-            if (!verifyResponse.ok) {
-                const verifyErr = await verifyResponse.json().catch(() => ({}));
-                console.error('[Strava] Token FAILED activity scope check:', verifyErr);
-                throw new Error(
-                    `Your Strava token is missing activity read permission (${verifyResponse.status}). ` +
-                    'Please go to https://www.strava.com/settings/apps, revoke access for this app, then reconnect here and check all permission boxes.'
-                );
-            }
-
-            const effectiveScope = grantedScope || 'activity:read_all';
-            saveTokenLocal(data, effectiveScope);
-
-            if (uid) {
-                await saveStravaTokens(uid, {
-                    access_token: data.access_token,
-                    refresh_token: data.refresh_token,
-                    expires_at: new Date().getTime() + (data.expires_in * 1000),
-                    athlete: data.athlete,
-                    scope: effectiveScope,
-                });
-            }
-            console.log('[Strava] Token saved and verified. Athlete:', data.athlete?.firstname);
-            return data.athlete;
-        } else {
-            const msg = data.message || 'Failed to exchange token';
-            console.error('[Strava] Token exchange failed:', data);
-            throw new Error(msg);
+        if (!data.access_token) {
+            throw new Error(data.message || 'No access token received from Strava');
         }
+
+        const effectiveScope = grantedScope || 'activity:read_all';
+        saveTokenLocal(data, effectiveScope);
+
+        if (uid) {
+            await saveStravaTokens(uid, {
+                access_token: data.access_token,
+                refresh_token: data.refresh_token,
+                expires_at: new Date().getTime() + (data.expires_in * 1000),
+                athlete: data.athlete,
+                scope: effectiveScope,
+            });
+        }
+
+        return data.athlete;
     } catch (error) {
         console.error('[Strava] Error handling callback:', error.message);
         throw error;
@@ -125,7 +138,7 @@ export const getStravaToken = async (uid) => {
             if (tokens && tokens.access_token) {
                 const nowMs = new Date().getTime();
                 const expiresAt = Number(tokens.expires_at) || 0;
-                console.log('[Strava] Firestore token found. Expires:', new Date(expiresAt).toISOString(), '| scope:', tokens.scope);
+                console.log('[Strava] Firestore token. Expires:', new Date(expiresAt).toISOString(), '| scope:', tokens.scope);
                 if (nowMs > expiresAt) {
                     console.log('[Strava] Token expired, refreshing...');
                     const newToken = await refreshToken(uid, tokens.refresh_token);
@@ -170,7 +183,7 @@ const refreshToken = async (uid, refreshTokenValue) => {
             })
         });
         const data = await response.json();
-        console.log('[Strava] Refresh response status:', response.status, '| has access_token:', !!data.access_token);
+        console.log('[Strava] Refresh status:', response.status);
         if (response.ok && data.access_token) {
             const existingScope = localStorage.getItem('strava_scope') || '';
             saveTokenLocal(data, existingScope);
@@ -183,7 +196,7 @@ const refreshToken = async (uid, refreshTokenValue) => {
             }
             return data.access_token;
         } else {
-            console.error('[Strava] Token refresh failed:', data);
+            console.error('[Strava] Refresh failed:', data);
         }
     } catch (e) {
         console.error('[Strava] Failed to refresh token:', e);
@@ -211,15 +224,13 @@ export const getActivities = async (uid) => {
             console.error('[Strava] Activities API error:', response.status, JSON.stringify(errData));
 
             if (response.status === 401) {
-                // Token is genuinely invalid — safe to disconnect
                 await disconnectStrava(uid);
                 throw new Error('Strava session expired. Please reconnect Strava.');
             }
             if (response.status === 403) {
-                // Scope missing — do NOT auto-disconnect, prompt user to re-authorize
                 throw new Error(
                     'Strava permission error: this app does not have activity read access. ' +
-                    'Please click "Reconnect / Re-authorize", and on Strava\'s screen make sure "View data about your activities" is checked.'
+                    'Please click "Reconnect / Re-authorize" to re-grant permissions.'
                 );
             }
             throw new Error(errData.message || `Strava API error (${response.status})`);
@@ -254,7 +265,7 @@ export const getActivityStreams = async (activityId, uid) => {
                 throw new Error('Strava session expired. Please reconnect Strava.');
             }
             if (response.status === 403) {
-                throw new Error('Strava permission error fetching activity details. Please reconnect Strava with activity permissions.');
+                throw new Error('Strava permission error fetching activity details. Please reconnect with activity permissions.');
             }
             throw new Error(errData.message || `Strava Stream API error (${response.status})`);
         }
