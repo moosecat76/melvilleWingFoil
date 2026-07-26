@@ -12,7 +12,7 @@ export const initiateStravaAuth = () => {
         alert('Please configure VITE_STRAVA_CLIENT_ID in your .env file.');
         return;
     }
-    const scope = 'activity:read_all,activity:read,read';
+    const scope = 'read,activity:read_all';
     const authUrl = `https://www.strava.com/oauth/authorize?client_id=${STRAVA_CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&approval_prompt=force&scope=${scope}`;
     console.log('[Strava] Initiating auth. client_id:', STRAVA_CLIENT_ID, '| redirect_uri:', REDIRECT_URI);
     window.location.href = authUrl;
@@ -108,9 +108,10 @@ export const handleStravaCallback = async (code, uid, explicitScope = '') => {
         if (!verifyResponse.ok) {
             const verifyErr = await verifyResponse.json().catch(() => ({}));
             console.error('[Strava] NEW Token FAILED activity scope check:', verifyErr);
+            const detailStr = JSON.stringify(verifyErr);
             throw new Error(
                 `Your newly generated Strava token is STILL missing activity read permission (${verifyResponse.status}). ` +
-                'This means Strava is denying the scope despite you checking the boxes. Please check your Strava App configuration.'
+                `Strava response: ${detailStr}. Please check your Strava App configuration.`
             );
         }
         // ------------------------------
