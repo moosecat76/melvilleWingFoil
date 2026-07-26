@@ -68,3 +68,4 @@ If you have an exported backup from `localStorage` (`wind-foil-backup.json`), yo
 ## Future Roadmap
 - Expanded Foil detection algorithms incorporating more granular rules.
 - Public sharing of specific sessions (Read-Only URLs).
+- AI advice based on your session data and the weather forecast.

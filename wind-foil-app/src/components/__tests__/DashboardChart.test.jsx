@@ -73,6 +73,7 @@ vi.mock('../../services/stravaService', () => ({
     handleStravaCallback: vi.fn(),
     getStravaUser: vi.fn().mockResolvedValue(null),
     getActivities: vi.fn().mockResolvedValue([]),
+    disconnectStrava: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../services/dbService', () => ({
