@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { getJournalEntries, addJournalEntry, deleteJournalEntry, updateJournalEntry } from '../services/journalService';
 import { Book, Plus, Trash2, Edit2, Calendar, Wind, Clock, MapPin, X, Activity } from 'lucide-react';
 import { format } from 'date-fns';
-import { getActivities, getStravaUser, getActivityStreams } from '../services/stravaService';
+import { getActivities, getStravaUser, getActivityStreams, initiateStravaAuth } from '../services/stravaService';
 import SessionMap from './SessionMap';
 import { analyzeSession } from '../services/foilAnalysisService';
 import FoilAnalysisChart from './FoilAnalysisChart';
@@ -163,19 +163,26 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
 
     const [stravaActivities, setStravaActivities] = useState([]);
     const [showActivityPicker, setShowActivityPicker] = useState(false);
+    const [isFetchingActivities, setIsFetchingActivities] = useState(false);
 
     const fetchStravaActivities = async () => {
+        setIsFetchingActivities(true);
         try {
             const acts = await getActivities(user?.uid);
-            if (acts && acts.length > 0) {
+            if (Array.isArray(acts) && acts.length > 0) {
                 setStravaActivities(acts);
                 setShowActivityPicker(true);
             } else {
-                alert('No recent activities found or not connected.');
+                alert('No recent activities found on your Strava account.');
             }
         } catch (e) {
-            console.error(e);
-            alert('Failed to load Strava activities. Check connection.');
+            console.error('Error fetching Strava activities:', e);
+            alert(e.message || 'Failed to load Strava activities. Check connection.');
+            if (e.message && (e.message.includes('expired') || e.message.includes('Forbidden') || e.message.includes('permission') || e.message.includes('reconnect'))) {
+                setStravaConnected(false);
+            }
+        } finally {
+            setIsFetchingActivities(false);
         }
     };
 
@@ -426,8 +433,8 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                             {stravaConnected ? (
                                 <>
                                     {!newEntry.stravaActivityId && (
-                                        <button type="button" onClick={fetchStravaActivities} className="btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: '#fc4c02', color: 'white', border: 'none', marginBottom: '10px' }}>
-                                            <Activity size={16} /> Link Strava Activity
+                                        <button type="button" onClick={fetchStravaActivities} disabled={isFetchingActivities} className="btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: '#fc4c02', color: 'white', border: 'none', marginBottom: '10px', opacity: isFetchingActivities ? 0.7 : 1 }}>
+                                            <Activity size={16} /> {isFetchingActivities ? 'Loading Activities...' : 'Link Strava Activity'}
                                         </button>
                                     )}
 
@@ -526,7 +533,16 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                                 </>
                             ) : (
                                 <div style={{ padding: '20px', textAlign: 'center' }}>
-                                    <p>Connect to Strava in Settings to enable map features.</p>
+                                    <p style={{ marginBottom: '12px', color: 'var(--text-secondary)' }}>
+                                        Strava is not connected or permission was revoked.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={initiateStravaAuth}
+                                        style={{ background: '#fc4c02', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
+                                    >
+                                        Connect / Re-connect Strava
+                                    </button>
                                 </div>
                             )}
                         </div>

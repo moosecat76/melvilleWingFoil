@@ -105,7 +105,16 @@ export const getStravaTokens = async (uid) => {
 };
 
 export const saveStravaTokens = async (uid, tokenData) => {
-    await setDoc(stravaDoc(uid), { ...tokenData, updatedAt: serverTimestamp() });
+    await setDoc(stravaDoc(uid), { ...tokenData, updatedAt: serverTimestamp() }, { merge: true });
+};
+
+export const deleteStravaTokens = async (uid) => {
+    if (!uid) return;
+    try {
+        await deleteDoc(stravaDoc(uid));
+    } catch (e) {
+        console.error('Failed to delete Strava tokens from Firestore:', e);
+    }
 };
 
 // ─── Migration helper ───────────────────────────────

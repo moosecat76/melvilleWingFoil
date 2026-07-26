@@ -15,7 +15,7 @@ import Journal from './Journal';
 import BestTime from './BestTime';
 import TodayForecastChart from './TodayForecastChart';
 import { exportData, importData } from '../services/storageService';
-import { initiateStravaAuth, handleStravaCallback, getStravaUser, getActivities } from '../services/stravaService';
+import { initiateStravaAuth, handleStravaCallback, getStravaUser, getActivities, disconnectStrava } from '../services/stravaService';
 import { Download, Upload, Database, Activity } from 'lucide-react';
 
 const CustomArrowDot = (props) => {
@@ -145,15 +145,16 @@ const Dashboard = () => {
         if (authLoading) return;
         const params = new URLSearchParams(window.location.search);
         const code = params.get('code');
+        const scopeParam = params.get('scope') || '';
         if (code) {
-            handleStravaCallback(code, user?.uid).then((athlete) => {
-                window.history.replaceState({}, document.title, "/");
+            window.history.replaceState({}, document.title, window.location.pathname);
+            handleStravaCallback(code, user?.uid, scopeParam).then((athlete) => {
                 setStravaUser(athlete);
                 alert('Strava Connected!');
                 setLoading(false);
             }).catch(e => {
                 console.error(e);
-                alert('Failed to connect Strava');
+                alert('Failed to connect Strava: ' + (e.message || 'Check credentials'));
             });
         }
     }, [user?.uid, authLoading]);
@@ -561,9 +562,17 @@ const Dashboard = () => {
                                 <Activity size={16} /> Connect Strava
                             </button>
                         ) : (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)' }}>
-                                <Activity size={16} color="#fc4c02" />
-                                <span>Connected as {stravaUser.firstname}</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                                    <Activity size={16} color="#fc4c02" />
+                                    <span>Connected as <strong>{stravaUser.firstname}</strong></span>
+                                </div>
+                                <button onClick={initiateStravaAuth} title="Re-authorize Strava with activity permissions" style={{ background: '#fc4c02', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}>
+                                    Reconnect / Re-authorize
+                                </button>
+                                <button onClick={async () => { await disconnectStrava(user?.uid); setStravaUser(null); }} style={{ background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}>
+                                    Disconnect
+                                </button>
                             </div>
                         )}
                     </div>
