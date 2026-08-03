@@ -2,21 +2,17 @@ import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { useLocation } from '../context/LocationContext';
 import { useAuth } from '../context/AuthContext';
 import { getJournalEntries, addJournalEntry, deleteJournalEntry, updateJournalEntry } from '../services/journalService';
-import { Book, Plus, Trash2, Edit2, Calendar, Wind, Clock, MapPin, X, Activity, ChevronRight } from 'lucide-react';
+import { Book, Plus, Trash2, Edit2, Calendar, Wind, Clock, MapPin, X, ChevronRight } from 'lucide-react';
 import { format } from 'date-fns';
-import { getActivities, getStravaUser, getActivityStreams, initiateStravaAuth } from '../services/stravaService';
+import { parseGpsFile } from '../services/tcxService';
 import { analyzeSession } from '../services/foilAnalysisService';
 import { useNavigate } from 'react-router-dom';
 import { getWeatherForecast, getTideForecast, processChartData } from '../services/weatherService';
+import { fetchRecentSessions, fetchSessionTelemetry, relabelActivityType } from '../services/googleFitService';
 
 const SessionMap = lazy(() => import('../components/SessionMap'));
 const FoilAnalysisChart = lazy(() => import('../components/FoilAnalysisChart'));
 
-const legacyCalculateStats = (streams, maxSpeedMs = 0, distanceMeters = 0) => {
-    const speedKts = maxSpeedMs * 1.94384;
-    const distanceKm = distanceMeters / 1000;
-    return { topSpeed: speedKts, distance: distanceKm };
-};
 
 const SessionsPage = () => {
     const { currentLocation } = useLocation();
@@ -26,17 +22,11 @@ const SessionsPage = () => {
     const [isAdding, setIsAdding] = useState(false);
     const [editId, setEditId] = useState(null);
     const [activeTab, setActiveTab] = useState('details');
-    const [stravaConnected, setStravaConnected] = useState(false);
-
-    // Check Strava connection status
-    useEffect(() => {
-        if (authLoading) return;
-        const checkStrava = async () => {
-            const su = await getStravaUser(user?.uid);
-            setStravaConnected(!!su);
-        };
-        checkStrava();
-    }, [user?.uid, authLoading]);
+    const [tcxFileName, setTcxFileName] = useState(null);
+    const [isTcxParsing, setIsTcxParsing] = useState(false);
+    const [gfitSessions, setGfitSessions] = useState(null);    // null=not loaded, []=[]
+    const [gfitLoading, setGfitLoading] = useState(false);
+    const [gfitLoadingId, setGfitLoadingId] = useState(null);  // id of session being fetched
 
     // Gear state 
     const [userGear, setUserGear] = useState([]);
@@ -172,10 +162,10 @@ const SessionsPage = () => {
             }
 
             // Reset
-            setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '', stravaActivityId: null, mapPolyline: null, streams: null, activityStats: null, foilAnalysis: null });
+            setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '', mapPolyline: null, streams: null, activityStats: null, foilAnalysis: null });
+            setTcxFileName(null);
             setIsAdding(false);
             setEditId(null);
-            setShowActivityPicker(false);
         } catch (err) {
             console.error('Failed to save journal entry:', err);
             alert('Failed to save entry: ' + err.message + '\n\nSee browser console for details.');
@@ -194,12 +184,12 @@ const SessionsPage = () => {
             windSpeed: entry.windSpeed || '',
             windGusts: entry.windGusts || '',
             windDirection: entry.windDirection || '',
-            stravaActivityId: entry.stravaActivityId || null,
             mapPolyline: entry.mapPolyline || null,
             streams: entry.streams || null,
             activityStats: entry.activityStats || null,
             foilAnalysis: entry.foilAnalysis || null
         });
+        setTcxFileName(entry.mapPolyline ? 'Saved track' : null);
         setIsAdding(true);
     };
 
@@ -210,68 +200,104 @@ const SessionsPage = () => {
         }
     };
 
-    const [stravaActivities, setStravaActivities] = useState([]);
-    const [showActivityPicker, setShowActivityPicker] = useState(false);
-    const [isFetchingActivities, setIsFetchingActivities] = useState(false);
-
-    const fetchStravaActivities = async () => {
-        setIsFetchingActivities(true);
+    const handleTcxFile = async (file) => {
+        if (!file) return;
+        setIsTcxParsing(true);
+        setTcxFileName(file.name);
         try {
-            const acts = await getActivities(user?.uid);
-            if (Array.isArray(acts) && acts.length > 0) {
-                setStravaActivities(acts);
-                setShowActivityPicker(true);
-            } else {
-                alert('No recent activities found on your Strava account.');
+            const { streams, activityStats, mapPolyline } = await parseGpsFile(file);
+            const analysis = analyzeSession(streams);
+
+            // Auto-fill date/time from the GPS track's start time
+            const startTime = activityStats.startTime;
+            setLogDate(format(startTime, 'yyyy-MM-dd'));
+            setLogTime(format(startTime, 'HH:mm'));
+
+            // Auto-fill wind from weather if available
+            let weatherUpdates = {};
+            const closest = findWeatherForTime(startTime, weatherData);
+            if (closest) {
+                weatherUpdates = {
+                    windSpeed: (closest.speed * 0.539957).toFixed(1),
+                    windGusts: (closest.gusts * 0.539957).toFixed(1),
+                    windDirection: closest.direction
+                };
             }
+
+            setNewEntry(prev => ({
+                ...prev,
+                ...weatherUpdates,
+                mapPolyline,
+                streams,
+                activityStats,
+                foilAnalysis: analysis
+            }));
         } catch (e) {
-            console.error('Error fetching Strava activities:', e);
-            alert(e.message || 'Failed to load Strava activities. Check connection.');
-            if (e.message && (e.message.includes('expired') || e.message.includes('Forbidden') || e.message.includes('permission') || e.message.includes('reconnect'))) {
-                setStravaConnected(false);
-            }
+            console.error('[TCX] Parse error:', e);
+            alert('Failed to parse GPS file: ' + e.message);
+            setTcxFileName(null);
         } finally {
-            setIsFetchingActivities(false);
+            setIsTcxParsing(false);
         }
     };
 
-    const handleSelectActivity = async (activity) => {
-        const date = new Date(activity.start_date);
-        setLogDate(format(date, 'yyyy-MM-dd'));
-        setLogTime(format(date, 'HH:mm'));
-
-        let streams = null;
+    // ── Fetch session list from Google Fit API ───────────────────────────────
+    const handleFetchGfitSessions = async () => {
+        setGfitLoading(true);
+        setGfitSessions(null);
         try {
-            streams = await getActivityStreams(activity.id, user?.uid);
+            const sessions = await fetchRecentSessions(user?.uid, 60);
+            setGfitSessions(sessions);
         } catch (e) {
-            console.error('Failed to fetch streams', e);
+            console.error('[GFit] fetchRecentSessions error:', e);
+            alert('Could not load Google Fit sessions: ' + e.message);
+            setGfitSessions([]);
+        } finally {
+            setGfitLoading(false);
         }
+    };
 
-        const basicStats = legacyCalculateStats(streams, activity.max_speed, activity.distance);
-        const analysis = analyzeSession(streams);
+    // ── Load telemetry for a selected session ────────────────────────────────
+    const handleGfitSessionSelect = async (session) => {
+        setGfitLoadingId(session.id);
+        try {
+            const { streams, activityStats, mapPolyline } = await fetchSessionTelemetry(user?.uid, session);
+            const analysis = analyzeSession(streams);
 
-        // Wind refill logic (explicit on selection)
-        let weatherUpdates = {};
-        const closest = findWeatherForTime(date, weatherData);
-        if (closest) {
-            weatherUpdates = {
-                windSpeed: (closest.speed * 0.539957).toFixed(1),
-                windGusts: (closest.gusts * 0.539957).toFixed(1),
-                windDirection: closest.direction
-            };
+            // Auto-fill date / time from session start
+            const startTime = activityStats.startTime;
+            setLogDate(format(startTime, 'yyyy-MM-dd'));
+            setLogTime(format(startTime, 'HH:mm'));
+
+            // Auto-fill wind from weather if available
+            let weatherUpdates = {};
+            const closest = findWeatherForTime(startTime, weatherData);
+            if (closest) {
+                weatherUpdates = {
+                    windSpeed:     (closest.speed * 0.539957).toFixed(1),
+                    windGusts:     (closest.gusts * 0.539957).toFixed(1),
+                    windDirection: closest.direction,
+                };
+            }
+
+            const label = relabelActivityType(session.activityType, session.name);
+            setTcxFileName(`Google Fit: ${label}`);
+            setGfitSessions(null);  // Dismiss the picker
+
+            setNewEntry(prev => ({
+                ...prev,
+                ...weatherUpdates,
+                mapPolyline,
+                streams,
+                activityStats,
+                foilAnalysis: analysis,
+            }));
+        } catch (e) {
+            console.error('[GFit] fetchSessionTelemetry error:', e);
+            alert('Failed to load session data: ' + e.message);
+        } finally {
+            setGfitLoadingId(null);
         }
-
-        setNewEntry(prev => ({
-            ...prev,
-            ...weatherUpdates,
-            stravaActivityId: activity.id,
-            mapPolyline: activity.map?.summary_polyline,
-            streams: streams,
-            notes: prev.notes || activity.name,
-            activityStats: basicStats,
-            foilAnalysis: analysis
-        }));
-        setShowActivityPicker(false);
     };
 
     // Get foil stats for a quick summary line
@@ -298,7 +324,8 @@ const SessionsPage = () => {
                         if (isAdding) {
                             setIsAdding(false);
                             setEditId(null);
-                            setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '', stravaActivityId: null, mapPolyline: null });
+                            setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '', mapPolyline: null, streams: null, activityStats: null, foilAnalysis: null });
+                            setTcxFileName(null);
                         } else {
                             setIsAdding(true);
                         }
@@ -484,111 +511,179 @@ const SessionsPage = () => {
                     {/* Tab Content: Map & Stats */}
                     {activeTab === 'map' && (
                         <div style={{ minHeight: '200px' }}>
-                            {stravaConnected ? (
-                                <>
-                                    {!newEntry.stravaActivityId && (
-                                        <button type="button" onClick={fetchStravaActivities} disabled={isFetchingActivities} className="btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: '#fc4c02', color: 'white', border: 'none', marginBottom: '10px', opacity: isFetchingActivities ? 0.7 : 1 }}>
-                                            <Activity size={16} /> {isFetchingActivities ? 'Loading Activities...' : 'Link Strava Activity'}
-                                        </button>
-                                    )}
+                            {/* ── Import options ── */}
+                            {!newEntry.mapPolyline && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
 
-                                    {showActivityPicker && (
-                                        <div style={{ marginTop: '8px', marginBottom: '10px', background: 'var(--bg-secondary)', borderRadius: '4px', overflow: 'hidden', maxHeight: '150px', overflowY: 'auto' }}>
-                                            {stravaActivities.map(act => (
-                                                <div
-                                                    key={act.id}
-                                                    onClick={() => handleSelectActivity(act)}
-                                                    style={{ padding: '8px', cursor: 'pointer', borderBottom: '1px solid var(--border-color)', fontSize: '0.85rem' }}
-                                                >
-                                                    <div style={{ fontWeight: 600 }}>{act.name}</div>
-                                                    <div style={{ color: 'var(--text-secondary)' }}>
-                                                        {format(new Date(act.start_date), 'MMM d, HH:mm')} • {(act.distance / 1000).toFixed(2)}km
+                                    {/* Google Fit session picker */}
+                                    <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', overflow: 'hidden' }}>
+                                        <button
+                                            type="button"
+                                            onClick={handleFetchGfitSessions}
+                                            disabled={gfitLoading}
+                                            style={{
+                                                width: '100%', padding: '14px 16px',
+                                                background: 'rgba(66,133,244,0.12)', border: 'none',
+                                                color: 'white', cursor: gfitLoading ? 'wait' : 'pointer',
+                                                display: 'flex', alignItems: 'center', gap: '10px',
+                                                fontSize: '0.9rem', fontWeight: 600,
+                                            }}
+                                        >
+                                            <span style={{ fontSize: '1.2rem' }}>🏃</span>
+                                            {gfitLoading ? 'Loading sessions…' : 'Fetch from Google Fit'}
+                                            <span style={{ marginLeft: 'auto', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 400 }}>last 60 days</span>
+                                        </button>
+
+                                        {/* Session list */}
+                                        {gfitSessions !== null && (
+                                            <div style={{ maxHeight: '240px', overflowY: 'auto', borderTop: '1px solid var(--border-color)' }}>
+                                                {gfitSessions.length === 0 ? (
+                                                    <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                                                        No sessions found in the last 60 days.
                                                     </div>
+                                                ) : (
+                                                    gfitSessions.map(session => {
+                                                        const startMs   = parseInt(session.startTimeMillis);
+                                                        const durMin    = Math.round((parseInt(session.endTimeMillis) - startMs) / 60000);
+                                                        const label     = relabelActivityType(session.activityType, session.name);
+                                                        const isLoading = gfitLoadingId === session.id;
+                                                        return (
+                                                            <button
+                                                                key={session.id}
+                                                                type="button"
+                                                                onClick={() => handleGfitSessionSelect(session)}
+                                                                disabled={!!gfitLoadingId}
+                                                                style={{
+                                                                    width: '100%', display: 'flex', alignItems: 'center',
+                                                                    gap: '12px', padding: '10px 16px',
+                                                                    background: isLoading ? 'rgba(66,133,244,0.15)' : 'transparent',
+                                                                    border: 'none', borderBottom: '1px solid rgba(255,255,255,0.06)',
+                                                                    color: 'var(--text-primary)', cursor: gfitLoadingId ? 'wait' : 'pointer',
+                                                                    textAlign: 'left', transition: 'background 0.15s',
+                                                                }}
+                                                                onMouseEnter={e => { if (!gfitLoadingId) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                                                                onMouseLeave={e => { e.currentTarget.style.background = isLoading ? 'rgba(66,133,244,0.15)' : 'transparent'; }}
+                                                            >
+                                                                <span style={{ fontSize: '1.4rem', lineHeight: 1 }}>
+                                                                    {label.includes('Wing Foil') ? '🪁' : label.includes('Windsur') ? '🏄' : '🏃'}
+                                                                </span>
+                                                                <div style={{ flex: 1 }}>
+                                                                    <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>{label}</div>
+                                                                    <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                                                                        {new Date(startMs).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                                                        {' · '}{durMin} min
+                                                                    </div>
+                                                                </div>
+                                                                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                                                    {isLoading ? '⏳ Loading…' : '→'}
+                                                                </span>
+                                                            </button>
+                                                        );
+                                                    })
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Divider */}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-secondary)', fontSize: '0.78rem' }}>
+                                        <div style={{ flex: 1, height: '1px', background: 'var(--border-color)' }} />
+                                        or import a file
+                                        <div style={{ flex: 1, height: '1px', background: 'var(--border-color)' }} />
+                                    </div>
+
+                                    {/* File drop zone */}
+                                    <label
+                                        htmlFor="tcx-file-input"
+                                        style={{
+                                            display: 'flex', flexDirection: 'column', alignItems: 'center',
+                                            justifyContent: 'center', gap: '8px', padding: '24px 20px',
+                                            border: '2px dashed var(--border-color)', borderRadius: '12px',
+                                            cursor: 'pointer', color: 'var(--text-secondary)',
+                                            textAlign: 'center', transition: 'border-color 0.2s',
+                                            opacity: isTcxParsing ? 0.6 : 1
+                                        }}
+                                        onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
+                                        onDragLeave={e => { e.currentTarget.style.borderColor = 'var(--border-color)'; }}
+                                        onDrop={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--border-color)'; const f = e.dataTransfer.files[0]; if (f) handleTcxFile(f); }}
+                                    >
+                                        <MapPin size={28} style={{ opacity: 0.5 }} />
+                                        {isTcxParsing ? (
+                                            <span>Parsing GPS file…</span>
+                                        ) : (
+                                            <>
+                                                <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.9rem' }}>Import TCX / GPX file</span>
+                                                <span style={{ fontSize: '0.8rem' }}>Drop here or click to browse</span>
+                                            </>
+                                        )}
+                                        <input
+                                            id="tcx-file-input" type="file" accept=".tcx,.gpx"
+                                            style={{ display: 'none' }} disabled={isTcxParsing}
+                                            onChange={e => { const f = e.target.files?.[0]; if (f) handleTcxFile(f); e.target.value = ''; }}
+                                        />
+                                    </label>
+                                </div>
+                            )}
+
+
+                            {/* ── Linked track view ── */}
+                            {newEntry.mapPolyline && (
+                                <div>
+                                    <div style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '8px', justifyContent: 'space-between' }}>
+                                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                            <MapPin size={14} />
+                                            <strong>{tcxFileName || 'GPS track imported'}</strong>
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => { setNewEntry({ ...newEntry, mapPolyline: null, streams: null, activityStats: null, foilAnalysis: null }); setTcxFileName(null); }}
+                                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '0.8rem', textDecoration: 'underline' }}
+                                        >
+                                            Remove track
+                                        </button>
+                                    </div>
+
+                                    {/* Top-level stats bar */}
+                                    {newEntry.activityStats && (
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '12px' }}>
+                                            {[{ label: 'Top Speed', value: `${newEntry.activityStats.topSpeed} kts`, color: 'var(--accent-primary)' },
+                                              { label: 'Avg Speed',  value: `${newEntry.activityStats.avgSpeed} kts`,  color: 'white' },
+                                              { label: 'Distance',   value: `${newEntry.activityStats.distance} km`,  color: 'white' },
+                                              { label: 'Duration',   value: `${newEntry.activityStats.duration} min`, color: 'white' },
+                                            ].map(stat => (
+                                                <div key={stat.label} style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '6px', textAlign: 'center' }}>
+                                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{stat.label}</div>
+                                                    <div style={{ fontSize: '0.95rem', fontWeight: 'bold', color: stat.color }}>{stat.value}</div>
                                                 </div>
                                             ))}
                                         </div>
                                     )}
 
-                                    {newEntry.stravaActivityId && (
-                                        <div>
-                                            <div style={{ fontSize: '0.8rem', color: '#fc4c02', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '5px', justifyContent: 'space-between' }}>
-                                                <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Activity size={14} /> Activity Linked</span>
-                                                <button type="button" onClick={() => setNewEntry({ ...newEntry, stravaActivityId: null, mapPolyline: null, streams: null })} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '0.8rem', textDecoration: 'underline' }}>Unlink</button>
+                                    {/* Map */}
+                                    <Suspense fallback={<div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading map…</div>}>
+                                        <SessionMap summary_polyline={newEntry.mapPolyline} streams={newEntry.streams} highlightIndex={hoveredIndex} />
+                                    </Suspense>
+
+                                    {/* Foil analysis chart */}
+                                    {newEntry.foilAnalysis && (
+                                        <div style={{ marginTop: '20px' }}>
+                                            <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading chart…</div>}>
+                                                <FoilAnalysisChart analysisData={newEntry.foilAnalysis} onHover={setHoveredIndex} />
+                                            </Suspense>
+                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginTop: '12px' }}>
+                                                {[{ label: 'Foil Time', value: `${newEntry.foilAnalysis.stats.totalFoilTime}m`, color: '#5cb85c' },
+                                                  { label: 'Flights',   value: newEntry.foilAnalysis.stats.numberOfFlights,       color: 'white' },
+                                                  { label: '% Foil',    value: `${newEntry.foilAnalysis.stats.percentFoil}%`,     color: '#38bdf8' },
+                                                  { label: 'Runs',      value: newEntry.foilAnalysis.stats.totalRuns,             color: '#facc15' },
+                                                ].map(stat => (
+                                                    <div key={stat.label} style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
+                                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{stat.label}</div>
+                                                        <div style={{ fontSize: '1rem', fontWeight: 'bold', color: stat.color }}>{stat.value}</div>
+                                                    </div>
+                                                ))}
                                             </div>
-                                            {newEntry.mapPolyline ? (
-                                                <Suspense fallback={<div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading map...</div>}>
-                                                    <SessionMap summary_polyline={newEntry.mapPolyline} streams={newEntry.streams} highlightIndex={hoveredIndex} />
-                                                </Suspense>
-                                            ) : (
-                                                <div style={{ padding: '20px', textAlign: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', color: 'var(--text-secondary)' }}>
-                                                    Activity linked, but no map data available.
-                                                </div>
-                                            )}
-
-                                            {newEntry.foilAnalysis && (
-                                                <div style={{ marginTop: '20px' }}>
-                                                    <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading chart...</div>}>
-                                                        <FoilAnalysisChart analysisData={newEntry.foilAnalysis} onHover={setHoveredIndex} />
-                                                    </Suspense>
-                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '8px', marginTop: '12px' }}>
-                                                        <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
-                                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Foil Time</div>
-                                                            <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#5cb85c' }}>{newEntry.foilAnalysis.stats.totalFoilTime}m</div>
-                                                        </div>
-                                                        <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
-                                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Flights</div>
-                                                            <div style={{ fontSize: '1rem', fontWeight: 'bold', color: 'white' }}>{newEntry.foilAnalysis.stats.numberOfFlights}</div>
-                                                        </div>
-                                                        <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
-                                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>% Foil</div>
-                                                            <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#38bdf8' }}>{newEntry.foilAnalysis.stats.percentFoil}%</div>
-                                                        </div>
-                                                        <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
-                                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Runs</div>
-                                                            <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#facc15' }}>{newEntry.foilAnalysis.stats.totalRuns}</div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            )}
-
-                                            {newEntry.activityStats && !newEntry.foilAnalysis && (
-                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginTop: '12px' }}>
-                                                    <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
-                                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Top Speed</div>
-                                                        <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--accent-primary)' }}>
-                                                            {newEntry.activityStats.topSpeed ? parseFloat(newEntry.activityStats.topSpeed).toFixed(1) : '–'} <span style={{ fontSize: '0.8rem' }}>kts</span>
-                                                        </div>
-                                                    </div>
-                                                    <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
-                                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Distance</div>
-                                                        <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'white' }}>
-                                                            {newEntry.activityStats.distance ? parseFloat(newEntry.activityStats.distance).toFixed(2) : '–'} <span style={{ fontSize: '0.8rem' }}>km</span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            )}
                                         </div>
                                     )}
-
-                                    {!newEntry.stravaActivityId && !showActivityPicker && (
-                                        <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)', border: '1px dashed var(--border-color)', borderRadius: '8px' }}>
-                                            <MapPin size={32} style={{ marginBottom: '8px', opacity: 0.5 }} />
-                                            <p>Link a Strava activity to see your track and speed analysis here.</p>
-                                        </div>
-                                    )}
-                                </>
-                            ) : (
-                                <div style={{ padding: '20px', textAlign: 'center' }}>
-                                    <p style={{ marginBottom: '12px', color: 'var(--text-secondary)' }}>
-                                        Strava is not connected or permission was revoked.
-                                    </p>
-                                    <button
-                                        type="button"
-                                        onClick={initiateStravaAuth}
-                                        style={{ background: '#fc4c02', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
-                                    >
-                                        Connect / Re-connect Strava
-                                    </button>
                                 </div>
                             )}
                         </div>

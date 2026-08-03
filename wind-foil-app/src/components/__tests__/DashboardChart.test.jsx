@@ -68,18 +68,24 @@ vi.mock('../../services/weatherService', () => ({
     processTodayChartData: vi.fn().mockReturnValue([])
 }));
 
-vi.mock('../../services/stravaService', () => ({
-    initiateStravaAuth: vi.fn(),
-    handleStravaCallback: vi.fn(),
-    getStravaUser: vi.fn().mockResolvedValue(null),
-    getActivities: vi.fn().mockResolvedValue([]),
-    disconnectStrava: vi.fn().mockResolvedValue(undefined),
+vi.mock('../../services/googleFitService', () => ({
+    initiateGoogleFitAuth: vi.fn(),
+    handleGoogleFitCallback: vi.fn(),
+    getGoogleFitUserAsync: vi.fn().mockResolvedValue(null),
+    disconnectGoogleFit: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('../../services/dbService', () => ({
-    migrateLocalStorageToFirestore: vi.fn().mockResolvedValue(undefined),
-    getUserGear: vi.fn().mockResolvedValue([]),
-}));
+vi.mock('../../services/dbService', async (importOriginal) => {
+    const actual = await importOriginal();
+    return {
+        ...actual,
+        migrateLocalStorageToFirestore: vi.fn().mockResolvedValue(undefined),
+        getUserGear: vi.fn().mockResolvedValue([]),
+        getGoogleFitTokens: vi.fn().mockResolvedValue(null),
+        saveGoogleFitTokens: vi.fn().mockResolvedValue(undefined),
+        deleteGoogleFitTokens: vi.fn().mockResolvedValue(undefined),
+    };
+});
 
 vi.mock('../../services/firebaseSetup', () => ({
     auth: {},

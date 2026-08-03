@@ -117,6 +117,29 @@ export const deleteStravaTokens = async (uid) => {
     }
 };
 
+// ─── Google Fit Tokens (per-user) ────────────────────
+const gfitDoc = (uid) => doc(db, 'users', uid, 'googlefit', 'tokens');
+
+export const getGoogleFitTokens = async (uid) => {
+    if (!uid) return null;
+    const snap = await getDoc(gfitDoc(uid));
+    return snap.exists() ? snap.data() : null;
+};
+
+export const saveGoogleFitTokens = async (uid, tokenData) => {
+    if (!uid) return;
+    await setDoc(gfitDoc(uid), { ...tokenData, updatedAt: serverTimestamp() }, { merge: true });
+};
+
+export const deleteGoogleFitTokens = async (uid) => {
+    if (!uid) return;
+    try {
+        await deleteDoc(gfitDoc(uid));
+    } catch (e) {
+        console.error('Failed to delete Google Fit tokens from Firestore:', e);
+    }
+};
+
 // ─── Migration helper ───────────────────────────────
 /**
  * One-time migration: move localStorage data into Firestore.

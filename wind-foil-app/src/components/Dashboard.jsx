@@ -15,8 +15,8 @@ import Journal from './Journal';
 import BestTime from './BestTime';
 import TodayForecastChart from './TodayForecastChart';
 import { exportData, importData } from '../services/storageService';
-import { initiateStravaAuth, handleStravaCallback, getStravaUser, getActivities, disconnectStrava } from '../services/stravaService';
-import { Download, Upload, Database, Activity } from 'lucide-react';
+import { initiateGoogleFitAuth, handleGoogleFitCallback, getGoogleFitUserAsync, disconnectGoogleFit } from '../services/googleFitService';
+import { Download, Upload, Database, Wifi } from 'lucide-react';
 
 const CustomArrowDot = (props) => {
     const { cx, cy, payload, index, getWindRating, idealWindDirection } = props;
@@ -44,7 +44,8 @@ const CustomArrowDot = (props) => {
 const Dashboard = () => {
     const { currentLocation } = useLocation();
     const { user, loading: authLoading } = useAuth();
-    const [stravaUser, setStravaUser] = useState(null);
+    const [googleFitUser, setGoogleFitUser] = useState(null);
+    const [gfitAuthLoading, setGfitAuthLoading] = useState(false);
 
     const [data, setData] = useState([]);
     const [todayData, setTodayData] = useState([]);
@@ -130,32 +131,31 @@ const Dashboard = () => {
         fetchData();
     }, [currentLocation]);
 
-    // Fetch Strava user on mount / user change
+    // ── Check Google Fit connection status on mount ──
     useEffect(() => {
         if (authLoading) return;
-        const fetchStravaUser = async () => {
-            const su = await getStravaUser(user?.uid);
-            setStravaUser(su);
-        };
-        fetchStravaUser();
+        getGoogleFitUserAsync(user?.uid).then(setGoogleFitUser);
     }, [user?.uid, authLoading]);
 
-    // Check for Strava Callback
+    // ── Handle Google Fit OAuth callback (?state=googlefit&code=...) ──
     useEffect(() => {
         if (authLoading) return;
         const params = new URLSearchParams(window.location.search);
-        const code = params.get('code');
-        const scopeParam = params.get('scope') || '';
-        if (code) {
+        const code  = params.get('code');
+        const state = params.get('state');
+        if (code && state === 'googlefit') {
             window.history.replaceState({}, document.title, window.location.pathname);
-            handleStravaCallback(code, user?.uid, scopeParam).then((athlete) => {
-                setStravaUser(athlete);
-                alert('Strava Connected!');
-                setLoading(false);
-            }).catch(e => {
-                console.error(e);
-                alert('Failed to connect Strava: ' + (e.message || 'Check credentials'));
-            });
+            setGfitAuthLoading(true);
+            handleGoogleFitCallback(code, user?.uid)
+                .then((profile) => {
+                    setGoogleFitUser(profile);
+                    alert(`Google Fit connected as ${profile.email || 'your account'}!`);
+                })
+                .catch((e) => {
+                    console.error('[Dashboard] Google Fit callback error:', e);
+                    alert('Google Fit connection failed: ' + e.message);
+                })
+                .finally(() => setGfitAuthLoading(false));
         }
     }, [user?.uid, authLoading]);
 
@@ -555,22 +555,35 @@ const Dashboard = () => {
                             />
                         </div>
 
+                        {/* Google Fit connect/disconnect */}
                         <div style={{ width: '1px', background: 'var(--border-color)', margin: '0 10px' }}></div>
 
-                        {!stravaUser ? (
-                            <button onClick={initiateStravaAuth} style={{ background: '#fc4c02', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <Activity size={16} /> Connect Strava
+                        {gfitAuthLoading ? (
+                            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Connecting…</span>
+                        ) : !googleFitUser ? (
+                            <button
+                                onClick={initiateGoogleFitAuth}
+                                style={{ background: '#4285F4', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}
+                            >
+                                <Wifi size={16} /> Connect Google Fit
                             </button>
                         ) : (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                                    <Activity size={16} color="#fc4c02" />
-                                    <span>Connected as <strong>{stravaUser.firstname}</strong></span>
+                                    <Wifi size={16} color="#4285F4" />
+                                    <span>Google Fit: <strong>{googleFitUser.email}</strong></span>
                                 </div>
-                                <button onClick={initiateStravaAuth} title="Re-authorize Strava with activity permissions" style={{ background: '#fc4c02', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}>
-                                    Reconnect / Re-authorize
+                                <button
+                                    onClick={initiateGoogleFitAuth}
+                                    title="Re-authorize Google Fit"
+                                    style={{ background: '#4285F4', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}
+                                >
+                                    Reconnect
                                 </button>
-                                <button onClick={async () => { await disconnectStrava(user?.uid); setStravaUser(null); }} style={{ background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}>
+                                <button
+                                    onClick={async () => { await disconnectGoogleFit(user?.uid); setGoogleFitUser(null); }}
+                                    style={{ background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}
+                                >
                                     Disconnect
                                 </button>
                             </div>
