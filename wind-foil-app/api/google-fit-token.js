@@ -7,6 +7,9 @@
  *   1. Authorization code → access/refresh token exchange (grant_type: 'authorization_code')
  *   2. Refresh token → new access token              (grant_type: 'refresh_token')
  *
+ * Used for Google Health API v4 OAuth (migrated from deprecated Google Fit REST API).
+ * The token exchange endpoint (oauth2.googleapis.com/token) is the same for both APIs.
+ *
  * The CLIENT_SECRET is NEVER sent to the browser.
  * The redirect_uri must be passed from the client because Google requires it to
  * exactly match what was used in the original authorization request.

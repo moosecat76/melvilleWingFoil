@@ -8,10 +8,11 @@ import { parseGpsFile } from '../services/tcxService';
 import { analyzeSession } from '../services/foilAnalysisService';
 import { useNavigate } from 'react-router-dom';
 import { getWeatherForecast, getTideForecast, processChartData } from '../services/weatherService';
-import { fetchRecentSessions, fetchSessionTelemetry, relabelActivityType } from '../services/googleFitService';
+import { fetchRecentSessions, fetchSessionTelemetry, relabelActivityType, sessionEmoji } from '../services/googleFitService';
 
 const SessionMap = lazy(() => import('../components/SessionMap'));
 const FoilAnalysisChart = lazy(() => import('../components/FoilAnalysisChart'));
+const HeartRateChart = lazy(() => import('../components/HeartRateChart'));
 
 
 const SessionsPage = () => {
@@ -241,7 +242,7 @@ const SessionsPage = () => {
         }
     };
 
-    // ── Fetch session list from Google Fit API ───────────────────────────────
+    // ── Fetch session list from Google Health API ───────────────────────────
     const handleFetchGfitSessions = async () => {
         setGfitLoading(true);
         setGfitSessions(null);
@@ -249,8 +250,8 @@ const SessionsPage = () => {
             const sessions = await fetchRecentSessions(user?.uid, 60);
             setGfitSessions(sessions);
         } catch (e) {
-            console.error('[GFit] fetchRecentSessions error:', e);
-            alert('Could not load Google Fit sessions: ' + e.message);
+            console.error('[GHealth] fetchRecentSessions error:', e);
+            alert('Could not load Google Health sessions: ' + e.message);
             setGfitSessions([]);
         } finally {
             setGfitLoading(false);
@@ -281,7 +282,7 @@ const SessionsPage = () => {
             }
 
             const label = relabelActivityType(session.activityType, session.name);
-            setTcxFileName(`Google Fit: ${label}`);
+            setTcxFileName(`Google Health: ${label}`);
             setGfitSessions(null);  // Dismiss the picker
 
             setNewEntry(prev => ({
@@ -511,11 +512,11 @@ const SessionsPage = () => {
                     {/* Tab Content: Map & Stats */}
                     {activeTab === 'map' && (
                         <div style={{ minHeight: '200px' }}>
-                            {/* ── Import options ── */}
-                            {!newEntry.mapPolyline && (
+                            {/* ── Import options (hide once any data is loaded) ── */}
+                            {!newEntry.streams && (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
 
-                                    {/* Google Fit session picker */}
+                                    {/* Google Health session picker */}
                                     <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', overflow: 'hidden' }}>
                                         <button
                                             type="button"
@@ -530,7 +531,7 @@ const SessionsPage = () => {
                                             }}
                                         >
                                             <span style={{ fontSize: '1.2rem' }}>🏃</span>
-                                            {gfitLoading ? 'Loading sessions…' : 'Fetch from Google Fit'}
+                                            {gfitLoading ? 'Loading sessions…' : 'Fetch from Google Health'}
                                             <span style={{ marginLeft: 'auto', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 400 }}>last 60 days</span>
                                         </button>
 
@@ -565,7 +566,7 @@ const SessionsPage = () => {
                                                                 onMouseLeave={e => { e.currentTarget.style.background = isLoading ? 'rgba(66,133,244,0.15)' : 'transparent'; }}
                                                             >
                                                                 <span style={{ fontSize: '1.4rem', lineHeight: 1 }}>
-                                                                    {label.includes('Wing Foil') ? '🪁' : label.includes('Windsur') ? '🏄' : '🏃'}
+                                                                    {sessionEmoji(label)}
                                                                 </span>
                                                                 <div style={{ flex: 1 }}>
                                                                     <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>{label}</div>
@@ -626,7 +627,55 @@ const SessionsPage = () => {
                             )}
 
 
-                            {/* ── Linked track view ── */}
+                            {/* ── Non-GPS session view (HR or basic metadata) ── */}
+                            {newEntry.streams && !newEntry.mapPolyline && (
+                                <div>
+                                    <div style={{ fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '8px', justifyContent: 'space-between' }}>
+                                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: newEntry.activityStats?.heartRateAvg ? '#f87171' : 'var(--accent-primary)' }}>
+                                            <span style={{ fontSize: '1rem' }}>{newEntry.activityStats?.heartRateAvg ? '❤️' : '⏱️'}</span>
+                                            <strong>{tcxFileName || (newEntry.activityStats?.heartRateAvg ? 'Heart rate only (no GPS)' : 'Basic session imported')}</strong>
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => { setNewEntry({ ...newEntry, mapPolyline: null, streams: null, activityStats: null, foilAnalysis: null }); setTcxFileName(null); }}
+                                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '0.8rem', textDecoration: 'underline' }}
+                                        >
+                                            Remove
+                                        </button>
+                                    </div>
+
+                                    {/* Stats bar */}
+                                    {newEntry.activityStats && (
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '12px' }}>
+                                            {[
+                                                { label: 'Duration',  value: `${newEntry.activityStats.duration} min`,             color: 'white' },
+                                                { label: 'Avg HR',    value: newEntry.activityStats.heartRateAvg ? `${newEntry.activityStats.heartRateAvg} bpm` : '—', color: '#f87171' },
+                                                { label: 'Max HR',    value: newEntry.activityStats.heartRateMax ? `${newEntry.activityStats.heartRateMax} bpm` : '—', color: '#fb923c' },
+                                            ].map(stat => (
+                                                <div key={stat.label} style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '6px', textAlign: 'center' }}>
+                                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{stat.label}</div>
+                                                    <div style={{ fontSize: '0.95rem', fontWeight: 'bold', color: stat.color }}>{stat.value}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {/* Heart Rate Chart (for Non-GPS sessions) */}
+                                    <Suspense fallback={null}>
+                                        <HeartRateChart streams={newEntry.streams} />
+                                    </Suspense>
+
+                                    <div style={{ padding: '16px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px', border: '1px solid var(--border-color)', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.83rem', marginTop: '12px' }}>
+                                        {newEntry.activityStats?.heartRateAvg ? (
+                                            <>❤️ No GPS track for this session — heart rate & duration data imported.</>
+                                        ) : (
+                                            <>⏱️ No GPS track or heart rate data found — date, start time, duration & weather auto-filled.</>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* ── Linked GPS track view ── */}
                             {newEntry.mapPolyline && (
                                 <div>
                                     <div style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '8px', justifyContent: 'space-between' }}>
@@ -684,6 +733,11 @@ const SessionsPage = () => {
                                             </div>
                                         </div>
                                     )}
+
+                                    {/* Heart Rate Chart (for GPS sessions) */}
+                                    <Suspense fallback={null}>
+                                        <HeartRateChart streams={newEntry.streams} onHover={setHoveredIndex} />
+                                    </Suspense>
                                 </div>
                             )}
                         </div>
@@ -753,6 +807,19 @@ const SessionsPage = () => {
                                             </div>
                                         )}
 
+                                        {/* Heart rate summary inline (for non-GPS / HR sessions) */}
+                                        {!analysis && (entry.activityStats?.heartRateAvg || entry.streams?.heartrate) && (
+                                            <div style={{ display: 'flex', gap: '12px', marginTop: '6px', fontSize: '0.8rem', color: '#f87171' }}>
+                                                <span>❤️ <b>{entry.activityStats?.heartRateAvg || '—'}</b> bpm avg</span>
+                                                {entry.activityStats?.heartRateMax && (
+                                                    <span style={{ color: '#fb923c' }}><b>{entry.activityStats.heartRateMax}</b> bpm max</span>
+                                                )}
+                                                {entry.activityStats?.duration && (
+                                                    <span style={{ color: 'var(--text-secondary)' }}>⏱️ <b>{entry.activityStats.duration}</b> min</span>
+                                                )}
+                                            </div>
+                                        )}
+
                                         {/* Gear */}
                                         {entry.gearUsed && (
                                             <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
@@ -792,11 +859,20 @@ const SessionsPage = () => {
                                     </div>
                                 )}
 
-                                {/* Most recent session — show chart */}
+                                {/* Most recent session or non-GPS session — show chart */}
                                 {isLatest && analysis && (
                                     <div style={{ marginTop: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }} onClick={(e) => e.stopPropagation()}>
                                         <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading chart...</div>}>
                                             <FoilAnalysisChart analysisData={analysis} />
+                                        </Suspense>
+                                    </div>
+                                )}
+
+                                {/* Heart rate chart for latest or non-GPS session */}
+                                {entry.streams && !analysis && (
+                                    <div style={{ marginTop: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }} onClick={(e) => e.stopPropagation()}>
+                                        <Suspense fallback={null}>
+                                            <HeartRateChart streams={entry.streams} />
                                         </Suspense>
                                     </div>
                                 )}

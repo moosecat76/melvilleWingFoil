@@ -120,13 +120,13 @@ const ForecastPage = () => {
         fetchData();
     }, [currentLocation]);
 
-    // ── Check Google Fit connection on mount ──
+    // ── Check Google Health connection on mount ──
     useEffect(() => {
         if (authLoading) return;
         getGoogleFitUserAsync(user?.uid).then(setGoogleFitUser);
     }, [user?.uid, authLoading]);
 
-    // ── Handle Google Fit OAuth callback (?state=googlefit&code=...) ──
+    // ── Handle Google Health OAuth callback (?state=googlefit&code=...) ──
     useEffect(() => {
         if (authLoading) return;
         const params = new URLSearchParams(window.location.search);
@@ -138,11 +138,11 @@ const ForecastPage = () => {
             handleGoogleFitCallback(code, user?.uid)
                 .then((profile) => {
                     setGoogleFitUser(profile);
-                    alert(`Google Fit connected as ${profile.email || 'your account'}!`);
+                    alert(`Google Health connected as ${profile.email || 'your account'}!`);
                 })
                 .catch((e) => {
-                    console.error('[ForecastPage] Google Fit callback error:', e);
-                    alert('Google Fit connection failed: ' + e.message);
+                    console.error('[ForecastPage] Google Health callback error:', e);
+                    alert('Google Health connection failed: ' + e.message);
                 })
                 .finally(() => setGfitAuthLoading(false));
         }
@@ -528,7 +528,7 @@ const ForecastPage = () => {
                             />
                         </div>
 
-                        {/* Google Fit connect/disconnect */}
+                        {/* Google Health connect/disconnect */}
                         <div style={{ width: '1px', background: 'var(--border-color)', margin: '0 10px' }}></div>
 
                         {gfitAuthLoading ? (
@@ -538,17 +538,17 @@ const ForecastPage = () => {
                                 onClick={initiateGoogleFitAuth}
                                 style={{ background: '#4285F4', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}
                             >
-                                <Wifi size={16} /> Connect Google Fit
+                                <Wifi size={16} /> Connect Google Health
                             </button>
                         ) : (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
                                     <Wifi size={16} color="#4285F4" />
-                                    <span>Google Fit: <strong>{googleFitUser.email}</strong></span>
+                                    <span>Google Health: <strong>{googleFitUser.email}</strong></span>
                                 </div>
                                 <button
                                     onClick={initiateGoogleFitAuth}
-                                    title="Re-authorize Google Fit"
+                                    title="Re-authorize Google Health"
                                     style={{ background: '#4285F4', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}
                                 >
                                     Reconnect

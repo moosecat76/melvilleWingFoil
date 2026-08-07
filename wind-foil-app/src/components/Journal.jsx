@@ -8,6 +8,7 @@ import { getActivities, getStravaUser, getActivityStreams, initiateStravaAuth } 
 import SessionMap from './SessionMap';
 import { analyzeSession } from '../services/foilAnalysisService';
 import FoilAnalysisChart from './FoilAnalysisChart';
+import HeartRateChart from './HeartRateChart';
 
 // Helper to calculate statistics (Legacy wrapper for backward compatibility or simple quick stats)
 const legacyCalculateStats = (streams, maxSpeedMs = 0, distanceMeters = 0) => {
@@ -589,50 +590,56 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
 
                             {/* Map Visualization & Stats */}
                             {entry.mapPolyline && (
-                                <>
-                                    <SessionMap summary_polyline={entry.mapPolyline} streams={entry.streams} />
-
-                                    {(() => {
-                                        // On-demand analysis for existing entries that might not have it saved yet
-                                        let analysis = entry.foilAnalysis;
-                                        if (!analysis && entry.streams) {
-                                            analysis = analyzeSession(entry.streams);
-                                        }
-
-                                        if (analysis) {
-                                            return (
-                                                <div style={{ marginTop: '10px' }}>
-                                                    <FoilAnalysisChart analysisData={analysis} />
-                                                    <div style={{ display: 'flex', gap: '10px', marginTop: '8px', fontSize: '0.85rem' }}>
-                                                        <span style={{ color: '#5cb85c' }}><b>{analysis.stats.totalFoilTime}m</b> Foil</span>
-                                                        <span style={{ color: '#38bdf8' }}><b>{analysis.stats.percentFoil}%</b> Eff.</span>
-                                                        <span style={{ color: '#facc15' }}><b>{analysis.stats.totalRuns}</b> Runs</span>
-                                                    </div>
-                                                </div>
-                                            )
-                                        }
-
-                                        // Fallback legacy stats
-                                        const stats = entry.activityStats || {};
-                                        return (
-                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '12px' }}>
-                                                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
-                                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Top Speed</div>
-                                                    <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--accent-primary)' }}>
-                                                        {stats.topSpeed ? parseFloat(stats.topSpeed).toFixed(1) : '–'} <span style={{ fontSize: '0.8rem' }}>kts</span>
-                                                    </div>
-                                                </div>
-                                                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
-                                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Distance</div>
-                                                    <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'white' }}>
-                                                        {stats.distance ? parseFloat(stats.distance).toFixed(2) : '–'} <span style={{ fontSize: '0.8rem' }}>km</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        );
-                                    })()}
-                                </>
+                                <SessionMap summary_polyline={entry.mapPolyline} streams={entry.streams} />
                             )}
+
+                            {(() => {
+                                let analysis = entry.foilAnalysis;
+                                if (!analysis && entry.streams) {
+                                    analysis = analyzeSession(entry.streams);
+                                }
+
+                                if (analysis) {
+                                    return (
+                                        <div style={{ marginTop: '10px' }}>
+                                            <FoilAnalysisChart analysisData={analysis} />
+                                            <div style={{ display: 'flex', gap: '10px', marginTop: '8px', fontSize: '0.85rem' }}>
+                                                <span style={{ color: '#5cb85c' }}><b>{analysis.stats.totalFoilTime}m</b> Foil</span>
+                                                <span style={{ color: '#38bdf8' }}><b>{analysis.stats.percentFoil}%</b> Eff.</span>
+                                                <span style={{ color: '#facc15' }}><b>{analysis.stats.totalRuns}</b> Runs</span>
+                                            </div>
+                                        </div>
+                                    );
+                                }
+
+                                if (entry.streams) {
+                                    return (
+                                        <div style={{ marginTop: '10px' }}>
+                                            <HeartRateChart streams={entry.streams} />
+                                        </div>
+                                    );
+                                }
+
+                                // Fallback legacy stats
+                                const stats = entry.activityStats || {};
+                                if (!stats.topSpeed && !stats.distance) return null;
+                                return (
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '12px' }}>
+                                        <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
+                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Top Speed</div>
+                                            <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--accent-primary)' }}>
+                                                {stats.topSpeed ? parseFloat(stats.topSpeed).toFixed(1) : '–'} <span style={{ fontSize: '0.8rem' }}>kts</span>
+                                            </div>
+                                        </div>
+                                        <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
+                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Distance</div>
+                                            <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'white' }}>
+                                                {stats.distance ? parseFloat(stats.distance).toFixed(2) : '–'} <span style={{ fontSize: '0.8rem' }}>km</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
 
                             <div style={{ textAlign: 'right', marginTop: '4px' }}>
                                 <button

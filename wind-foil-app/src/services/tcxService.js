@@ -59,14 +59,18 @@ const smoothSpeeds = (speeds, windowSize = 5) => {
 // ─── Build streams + stats from raw parsed trackpoints ────────────────────────
 const buildResult = (rawPoints) => {
     if (!rawPoints || rawPoints.length < 2) {
-        throw new Error('File has fewer than 2 valid GPS points.');
+        throw new Error('File has fewer than 2 valid time data points.');
     }
 
-    // Recalculate cumulative distance if not supplied (all zeros)
-    if (rawPoints.every(p => p.distanceM === 0)) {
+    const hasGps = rawPoints.some(p => !isNaN(p.lat) && !isNaN(p.lng));
+
+    // Recalculate cumulative distance if GPS is present but distance is all zeros
+    if (hasGps && rawPoints.every(p => p.distanceM === 0)) {
         let cum = 0;
         for (let i = 1; i < rawPoints.length; i++) {
-            cum += haversineM(rawPoints[i - 1].lat, rawPoints[i - 1].lng, rawPoints[i].lat, rawPoints[i].lng);
+            if (!isNaN(rawPoints[i - 1].lat) && !isNaN(rawPoints[i].lat)) {
+                cum += haversineM(rawPoints[i - 1].lat, rawPoints[i - 1].lng, rawPoints[i].lat, rawPoints[i].lng);
+            }
             rawPoints[i].distanceM = cum;
         }
     }
@@ -82,25 +86,29 @@ const buildResult = (rawPoints) => {
     for (let i = 0; i < rawPoints.length; i++) {
         const p = rawPoints[i];
         timeData.push((p.timeMs - startMs) / 1000);
-        latlngData.push([p.lat, p.lng]);
-        altData.push(p.altitudeM);
-        distData.push(p.distanceM);
+        if (hasGps && !isNaN(p.lat) && !isNaN(p.lng)) {
+            latlngData.push([p.lat, p.lng]);
+        }
+        altData.push(p.altitudeM || 0);
+        distData.push(p.distanceM || 0);
         heartData.push(p.heartRate || 0);
 
-        if (i === 0) {
-            rawSpeeds.push(0);
-        } else {
-            const prev = rawPoints[i - 1];
-            const dt = (p.timeMs - prev.timeMs) / 1000;
-            if (dt > 0) {
-                rawSpeeds.push(haversineM(prev.lat, prev.lng, p.lat, p.lng) / dt);
+        if (hasGps) {
+            if (i === 0) {
+                rawSpeeds.push(0);
             } else {
-                rawSpeeds.push(rawSpeeds[i - 1] || 0);
+                const prev = rawPoints[i - 1];
+                const dt = (p.timeMs - prev.timeMs) / 1000;
+                if (dt > 0 && !isNaN(prev.lat) && !isNaN(p.lat)) {
+                    rawSpeeds.push(haversineM(prev.lat, prev.lng, p.lat, p.lng) / dt);
+                } else {
+                    rawSpeeds.push(rawSpeeds[i - 1] || 0);
+                }
             }
         }
     }
 
-    const smoothedSpeeds = smoothSpeeds(rawSpeeds, 5);
+    const smoothedSpeeds = hasGps ? smoothSpeeds(rawSpeeds, 5) : [];
 
     const streams = {
         time:            { data: timeData },
@@ -111,27 +119,43 @@ const buildResult = (rawPoints) => {
         heartrate:       { data: heartData },
     };
 
-    // Stats
-    const maxSpeedMs  = Math.max(...smoothedSpeeds);
-    const movingVels  = smoothedSpeeds.filter(v => v > 0.3);
-    const avgSpeedMs  = movingVels.length > 0
-        ? movingVels.reduce((a, b) => a + b, 0) / movingVels.length
-        : 0;
-    const totalDistM  = rawPoints[rawPoints.length - 1].distanceM;
-    const durationMs  = rawPoints[rawPoints.length - 1].timeMs - startMs;
-    const hrs         = heartData.filter(h => h > 0);
+    const durationMs = rawPoints[rawPoints.length - 1].timeMs - startMs;
+    const hrs = heartData.filter(h => h > 0);
 
-    const activityStats = {
-        topSpeed:     (maxSpeedMs  * 1.94384).toFixed(1),   // kts
-        avgSpeed:     (avgSpeedMs  * 1.94384).toFixed(1),   // kts
-        distance:     (totalDistM  / 1000).toFixed(2),       // km
-        duration:     (durationMs  / 60000).toFixed(1),      // minutes
-        startTime:    new Date(startMs),
-        heartRateAvg: hrs.length > 0 ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : null,
-        heartRateMax: hrs.length > 0 ? Math.max(...hrs) : null,
-    };
+    let activityStats;
+    let mapPolyline = null;
 
-    const mapPolyline = encodePolyline(rawPoints.map(p => [p.lat, p.lng]));
+    if (hasGps && latlngData.length > 1) {
+        const maxSpeedMs = Math.max(...smoothedSpeeds);
+        const movingVels = smoothedSpeeds.filter(v => v > 0.3);
+        const avgSpeedMs = movingVels.length > 0
+            ? movingVels.reduce((a, b) => a + b, 0) / movingVels.length
+            : 0;
+        const totalDistM = rawPoints[rawPoints.length - 1].distanceM || 0;
+
+        activityStats = {
+            topSpeed:     (maxSpeedMs * 1.94384).toFixed(1),
+            avgSpeed:     (avgSpeedMs * 1.94384).toFixed(1),
+            distance:     (totalDistM / 1000).toFixed(2),
+            duration:     (durationMs / 60000).toFixed(1),
+            startTime:    new Date(startMs),
+            heartRateAvg: hrs.length > 0 ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : null,
+            heartRateMax: hrs.length > 0 ? Math.max(...hrs) : null,
+            hasGps:       true,
+        };
+        mapPolyline = encodePolyline(latlngData);
+    } else {
+        activityStats = {
+            topSpeed:     null,
+            avgSpeed:     null,
+            distance:     null,
+            duration:     (durationMs / 60000).toFixed(1),
+            startTime:    new Date(startMs),
+            heartRateAvg: hrs.length > 0 ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : null,
+            heartRateMax: hrs.length > 0 ? Math.max(...hrs) : null,
+            hasGps:       false,
+        };
+    }
 
     return { streams, activityStats, mapPolyline };
 };
@@ -157,7 +181,7 @@ export const parseTcxFile = (xmlText) => {
         const hrValue = tp.querySelector('HeartRateBpm Value') || tp.querySelector('HeartRateBpm > Value');
         const hr = hrValue ? parseInt(hrValue.textContent) : 0;
 
-        if (!isNaN(lat) && !isNaN(lng) && time) {
+        if (time) {
             const ms = new Date(time).getTime();
             if (!isNaN(ms)) {
                 rawPoints.push({ lat, lng, timeMs: ms, altitudeM: alt, distanceM: dist, heartRate: hr });
@@ -190,12 +214,14 @@ export const parseGpxFile = (xmlText) => {
                      pt.querySelector('gpxtpx\\:hr') || pt.querySelector('ns3\\:hr');
         const hr = hrEl ? parseInt(hrEl.textContent) : 0;
 
-        if (!isNaN(lat) && !isNaN(lng) && time) {
+        if (time) {
             const ms = new Date(time).getTime();
             if (!isNaN(ms)) {
                 if (i > 0 && rawPoints.length > 0) {
                     const prev = rawPoints[rawPoints.length - 1];
-                    cumDist += haversineM(prev.lat, prev.lng, lat, lng);
+                    if (!isNaN(prev.lat) && !isNaN(lat)) {
+                        cumDist += haversineM(prev.lat, prev.lng, lat, lng);
+                    }
                 }
                 rawPoints.push({ lat, lng, timeMs: ms, altitudeM: alt, distanceM: cumDist, heartRate: hr });
             }

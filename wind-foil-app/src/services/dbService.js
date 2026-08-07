@@ -117,7 +117,9 @@ export const deleteStravaTokens = async (uid) => {
     }
 };
 
-// ─── Google Fit Tokens (per-user) ────────────────────
+// ─── Google Health Tokens (per-user) ─────────────────
+// Stored at the same Firestore path for backwards compatibility.
+// Previously called "Google Fit" tokens; now used for Google Health API v4.
 const gfitDoc = (uid) => doc(db, 'users', uid, 'googlefit', 'tokens');
 
 export const getGoogleFitTokens = async (uid) => {
@@ -136,7 +138,7 @@ export const deleteGoogleFitTokens = async (uid) => {
     try {
         await deleteDoc(gfitDoc(uid));
     } catch (e) {
-        console.error('Failed to delete Google Fit tokens from Firestore:', e);
+        console.error('Failed to delete Google Health tokens from Firestore:', e);
     }
 };
 

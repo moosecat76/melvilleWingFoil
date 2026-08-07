@@ -34,9 +34,14 @@ export const analyzeSession = (streams) => {
         timeStream = streams.time?.data;
     }
 
-    if (!velocityStream || !altitudeStream || !timeStream) {
-        console.warn("Missing required streams for foil analysis.");
-        return null; // Cannot analyze without core data
+    if (!velocityStream || !altitudeStream || !timeStream || velocityStream.length === 0 || altitudeStream.length === 0) {
+        return null; // Cannot analyze without core GPS data
+    }
+
+    // Check if streams actually contain valid motion/altitude data
+    const hasMotion = velocityStream.some(v => v > 0) || altitudeStream.some(a => a !== 0);
+    if (!hasMotion) {
+        return null;
     }
 
     // 2. Dynamic Calibration & Point-by-Point Detection

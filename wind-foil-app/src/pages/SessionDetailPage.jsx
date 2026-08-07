@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext';
 
 const SessionMap = lazy(() => import('../components/SessionMap'));
 const FoilAnalysisChart = lazy(() => import('../components/FoilAnalysisChart'));
+const HeartRateChart = lazy(() => import('../components/HeartRateChart'));
 
 const SessionDetailPage = () => {
     const { id } = useParams();
@@ -169,6 +170,15 @@ const SessionDetailPage = () => {
                 <div className="glass-panel" style={{ padding: '16px', marginBottom: '1.5rem' }}>
                     <Suspense fallback={<div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading chart...</div>}>
                         <FoilAnalysisChart analysisData={analysis} onHover={setHoveredIndex} />
+                    </Suspense>
+                </div>
+            )}
+
+            {/* Heart Rate Chart */}
+            {entry.streams && (
+                <div style={{ marginBottom: '1.5rem' }}>
+                    <Suspense fallback={null}>
+                        <HeartRateChart streams={entry.streams} onHover={setHoveredIndex} />
                     </Suspense>
                 </div>
             )}
