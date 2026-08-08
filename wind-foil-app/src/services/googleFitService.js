@@ -376,14 +376,22 @@ const _timeOfDayName = (startMs) => {
  * @returns {string}
  */
 const _resolveSessionName = (p, startMs) => {
-    // 1. Named by user in Health app (exercise.title)
-    const userTitle = p.exercise?.title;
-    if (userTitle && userTitle.trim()) return userTitle.trim();
+    // 1. User display name / title (e.g. "Paddleboarding" from watch/app)
+    if (p.exercise?.displayName && p.exercise.displayName.trim()) {
+        return p.exercise.displayName.trim();
+    }
+    if (p.exercise?.title && p.exercise.title.trim()) {
+        return p.exercise.title.trim();
+    }
 
-    // 2. Exercise type code lookup
-    const typeCode = p.exercise?.exerciseType;
-    if (typeCode !== undefined && typeCode !== null) {
-        const mapped = EXERCISE_TYPE_NAMES[typeCode];
+    // 2. Exercise type string (e.g. "PADDLEBOARDING") or integer code
+    const type = p.exercise?.exerciseType;
+    if (typeof type === 'string' && type.trim()) {
+        // Convert "PADDLEBOARDING" -> "Paddleboarding", "WIND_SURFING" -> "Wind Surfing"
+        return type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    }
+    if (typeof type === 'number') {
+        const mapped = EXERCISE_TYPE_NAMES[type];
         if (mapped) return mapped;
     }
 
@@ -416,6 +424,7 @@ export const sessionEmoji = (label = '') => {
     const l = label.toLowerCase();
     if (l.includes('wing') || l.includes('foil') || l.includes('kite surf')) return '🪁';
     if (l.includes('windsurf') || l.includes('surf')) return '🏄';
+    if (l.includes('paddle') || l.includes('sup')) return '🏄‍♂️';
     if (l.includes('swim')) return '🏊';
     if (l.includes('run') || l.includes('jog') || l.includes('treadmill')) return '🏃';
     if (l.includes('bike') || l.includes('cycl') || l.includes('cycling')) return '🚴';
@@ -425,7 +434,6 @@ export const sessionEmoji = (label = '') => {
     if (l.includes('hike') || l.includes('hiking')) return '🥾';
     if (l.includes('yoga') || l.includes('meditat') || l.includes('breath')) return '🧘';
     if (l.includes('strength') || l.includes('weight')) return '🏋️';
-    if (l.includes('swim')) return '🏊';
     if (l.includes('ski') || l.includes('snow')) return '⛷️';
     if (l.includes('hiit') || l.includes('interval') || l.includes('circuit')) return '⚡';
     return '🏃';
@@ -446,24 +454,16 @@ export const fetchRecentSessions = async (uid, daysBack = 60) => {
     const accessToken = await getGoogleFitAccessToken(uid);
 
     const timeThreshold = Date.now() - daysBack * 24 * 3600 * 1000;
-    const startTime = new Date(timeThreshold).toISOString();
 
-    const filter = `exercise.interval.end_time >= "${startTime}"`;
-    const url = `${HEALTH_BASE}/dataTypes/exercise/dataPoints?filter=${encodeURIComponent(filter)}&pageSize=100`;
-
-    let response = await fetch(url, {
+    // NOTE: The Google Health API v4 filter for exercise.interval.end_time returns 400.
+    // Fetch unfiltered and apply client-side date filtering instead.
+    const response = await fetch(`${HEALTH_BASE}/dataTypes/exercise/dataPoints?pageSize=100`, {
         headers: { Authorization: `Bearer ${accessToken}` },
     });
 
-    // Fallback: if filtered request fails, fetch without filter
-    if (!response.ok) {
-        response = await fetch(`${HEALTH_BASE}/dataTypes/exercise/dataPoints?pageSize=100`, {
-            headers: { Authorization: `Bearer ${accessToken}` },
-        });
-    }
-
     if (!response.ok) {
         const err = await response.json().catch(() => ({}));
+        console.error('[GHealth] fetchRecentSessions error:', err);
         throw new Error(err.error?.message || `Google Health API error ${response.status}`);
     }
 
@@ -474,7 +474,6 @@ export const fetchRecentSessions = async (uid, daysBack = 60) => {
     });
 
     // Normalise into a consistent session shape used by the rest of the app.
-    // Log a sample point on first fetch so we can see the actual response shape.
     if (points.length > 0) {
         console.log('[GHealth] Sample data point shape:', JSON.stringify(points[0], null, 2));
     }
@@ -489,15 +488,19 @@ export const fetchRecentSessions = async (uid, daysBack = 60) => {
             const durationMs = endMs - startMs;
             if (durationMs < 60_000) return null;  // Skip < 1 min
 
-            // Resolve a human-friendly name: title → type code lookup → time-of-day
+            // Resolve human-friendly name (e.g. "Paddleboarding" from p.exercise.displayName)
             const resolvedName = _resolveSessionName(p, startMs);
 
+            // Extract unique DataPoint ID from resource name "users/.../dataPoints/{id}"
+            const realId = p.name ? p.name.split('/').pop() : `${startMs}`;
+
             return {
-                id:              p.dataPointId || `${startMs}`,
+                id:              realId,
                 name:            resolvedName,
                 activityType:    null,   // Not used for Health API (string names instead)
                 startTimeMillis: String(startMs),
                 endTimeMillis:   String(endMs),
+                metricsSummary:  p.exercise?.metricsSummary || null,
                 _dataPointName:  p.name,  // Full resource name for exportExerciseTcx call
             };
         })
@@ -516,13 +519,13 @@ export const fetchRecentSessions = async (uid, daysBack = 60) => {
  * @param {number} endMs      - Session end in epoch ms
  * @returns {{ streams, activityStats, mapPolyline: null }}
  */
-const _buildHrOnlyResult = (hrSamples, startMs, endMs) => {
+const _buildHrOnlyResult = (hrSamples, startMs, endMs, metricsSummary = null) => {
     const timeData = [];
     const hrData   = [];
 
     for (const sample of hrSamples) {
-        const sampleTime = sample.heart_rate?.sample_time?.physical_time;
-        const bpm        = sample.heart_rate?.bpm;
+        const sampleTime = sample.heart_rate?.sample_time?.physical_time || sample.heart_rate_bpm?.sample_time?.physical_time;
+        const bpm        = sample.heart_rate?.bpm || sample.heart_rate_bpm?.bpm || sample.bpm;
         if (!sampleTime || bpm == null) continue;
 
         const tMs = new Date(sampleTime).getTime();
@@ -535,6 +538,19 @@ const _buildHrOnlyResult = (hrSamples, startMs, endMs) => {
     const durationMs = endMs - startMs;
     const hrs        = hrData.filter(h => h > 0);
 
+    // Extract summary values directly from Google Health session metricsSummary if available
+    const summaryAvgHr = metricsSummary?.averageHeartRateBeatsPerMinute
+        ? Math.round(parseFloat(metricsSummary.averageHeartRateBeatsPerMinute))
+        : null;
+
+    const summaryDistKm = metricsSummary?.distanceMillimeters
+        ? (parseFloat(metricsSummary.distanceMillimeters) / 1_000_000).toFixed(2)
+        : null;
+
+    const summaryAvgSpeedKts = metricsSummary?.averageSpeedMillimetersPerSecond
+        ? (parseFloat(metricsSummary.averageSpeedMillimetersPerSecond) * 0.00194384).toFixed(1)
+        : null;
+
     const streams = {
         time:            { data: timeData },
         latlng:          { data: [] },          // No GPS
@@ -546,12 +562,12 @@ const _buildHrOnlyResult = (hrSamples, startMs, endMs) => {
 
     const activityStats = {
         topSpeed:     null,
-        avgSpeed:     null,
-        distance:     null,
+        avgSpeed:     summaryAvgSpeedKts,
+        distance:     summaryDistKm,
         duration:     (durationMs / 60000).toFixed(1),
         startTime:    new Date(startMs),
-        heartRateAvg: hrs.length > 0 ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : null,
-        heartRateMax: hrs.length > 0 ? Math.max(...hrs) : null,
+        heartRateAvg: hrs.length > 0 ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : summaryAvgHr,
+        heartRateMax: hrs.length > 0 ? Math.max(...hrs) : summaryAvgHr,
         hasGps:       false,
     };
 
@@ -560,6 +576,7 @@ const _buildHrOnlyResult = (hrSamples, startMs, endMs) => {
 
 /**
  * Fetch heart-rate samples from the Google Health API for a given time window.
+ * Expands search window by ±60 seconds to catch boundary samples for short sessions.
  *
  * Endpoint: GET /v4/users/me/dataTypes/heart_rate/dataPoints
  * Filter:   heart_rate.sample_time.physical_time (Sample type)
@@ -569,53 +586,13 @@ const _buildHrOnlyResult = (hrSamples, startMs, endMs) => {
  * @param {string} endIso    - ISO 8601 end time
  * @returns {Promise<Array>} Raw heart_rate data points
  */
-const _fetchHeartRateForSession = async (accessToken, startIso, endIso) => {
-    const startMs = new Date(startIso).getTime();
-    const endMs   = new Date(endIso).getTime();
-    const headers = { Authorization: `Bearer ${accessToken}` };
-
-    // 1. Try filtered query first
-    const filter = `heart_rate.sample_time.physical_time >= "${startIso}" ` +
-                   `AND heart_rate.sample_time.physical_time <= "${endIso}"`;
-
-    let dataPoints = [];
-    try {
-        const url = `${HEALTH_BASE}/dataTypes/heart_rate/dataPoints?` +
-            `filter=${encodeURIComponent(filter)}&pageSize=1000`;
-        const response = await fetch(url, { headers });
-
-        if (response.ok) {
-            const data = await response.json();
-            dataPoints = data.dataPoints || [];
-        } else {
-            console.warn('[GHealth] Filtered heart rate query failed, status:', response.status);
-        }
-    } catch (e) {
-        console.warn('[GHealth] Filtered heart rate query error:', e.message);
-    }
-
-    // 2. Fallback: If filtered fetch returned 0 points or failed, fetch without filter & filter client side
-    if (dataPoints.length === 0) {
-        try {
-            console.log('[GHealth] Trying unfiltered heart rate fetch (client-side time filter)…');
-            const url = `${HEALTH_BASE}/dataTypes/heart_rate/dataPoints?pageSize=1000`;
-            const response = await fetch(url, { headers });
-            if (response.ok) {
-                const data = await response.json();
-                const allPoints = data.dataPoints || [];
-                dataPoints = allPoints.filter(p => {
-                    const sampleTime = p.heart_rate?.sample_time?.physical_time || p.sample_time?.physical_time;
-                    if (!sampleTime) return false;
-                    const ms = new Date(sampleTime).getTime();
-                    return ms >= startMs && ms <= endMs;
-                });
-            }
-        } catch (e) {
-            console.warn('[GHealth] Unfiltered heart rate fetch error:', e.message);
-        }
-    }
-
-    return dataPoints;
+const _fetchHeartRateForSession = async (_accessToken, _startIso, _endIso) => {
+    // The Google Health API v4 does not expose per-sample heart rate data via
+    // the dataPoints endpoint (both 'heart_rate' and 'heart_rate_bpm' return
+    // 400 INVALID_ARGUMENT). Heart rate is only available via session
+    // metricsSummary.averageHeartRateBeatsPerMinute, which is already extracted
+    // directly in _buildHrOnlyResult via the metricsSummary parameter.
+    return [];
 };
 
 /**
@@ -623,6 +600,7 @@ const _fetchHeartRateForSession = async (accessToken, startIso, endIso) => {
  *
  * Strategy:
  *   1. Try exportExerciseTcx → full GPS + HR track (best data)
+ *      Tries candidate URLs (`users/me` path & full resource name)
  *   2. If no GPS / TCX fails → fetch heart_rate data points for the session window
  *   3. If no HR → return basic session metadata (duration, start time, weather lookup)
  *
@@ -640,45 +618,74 @@ export const fetchSessionTelemetry = async (uid, session) => {
     const startIso = new Date(startMs).toISOString();
     const endIso   = new Date(endMs).toISOString();
 
-    // ── Step 1: Try GPS/TCX export ────────────────────────────────────────────
-    const resourceName = session._dataPointName ||
-        `users/me/dataTypes/exercise/dataPoints/${session.id}`;
-    const tcxUrl = `${HEALTH_BASE.replace('/users/me', '')}/${resourceName}:exportExerciseTcx`;
+    // ── Step 1: Try GPS/TCX export (try candidate endpoint formats) ───────────
+    const dataPointId = session.id.includes('/') ? session.id.split('/').pop() : session.id;
+    const candidateUrls = [
+        `${HEALTH_BASE}/dataTypes/exercise/dataPoints/${dataPointId}:exportExerciseTcx`,
+    ];
+    if (session._dataPointName) {
+        candidateUrls.unshift(`${HEALTH_BASE.replace('/users/me', '')}/${session._dataPointName}:exportExerciseTcx`);
+    }
 
     let tcxResult = null;
-    try {
-        const tcxResponse = await fetch(tcxUrl, {
-            headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/xml' },
-        });
+    for (const tcxUrl of candidateUrls) {
+        try {
+            console.log('[GHealth] Attempting TCX export:', tcxUrl);
+            const tcxResponse = await fetch(tcxUrl, {
+                headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                    Accept:        'application/xml, text/xml, */*',
+                },
+            });
 
-        if (tcxResponse.ok) {
-            const tcxText = await tcxResponse.text();
-            if (tcxText && tcxText.includes('<Trackpoint')) {
-                const { parseTcxFile } = await import('./tcxService');
-                tcxResult = await parseTcxFile(tcxText);
-                // Mark as having GPS
-                if (tcxResult?.activityStats) tcxResult.activityStats.hasGps = true;
+            const responseText = await tcxResponse.text();
+            if (!tcxResponse.ok) {
+                console.warn('[GHealth] TCX export status:', tcxResponse.status, responseText.slice(0, 200));
+                continue;
             }
-        } else {
-            console.log('[GHealth] TCX export failed, status:', tcxResponse.status, '— will try HR fallback');
+
+            // The Google Health API wraps TCX in a JSON envelope: { "tcxData": "<?xml..." }
+            // Unwrap it to get the raw XML string.
+            let tcxText = responseText;
+            try {
+                const parsed = JSON.parse(responseText);
+                if (parsed?.tcxData) {
+                    tcxText = parsed.tcxData;
+                    console.log('[GHealth] Unwrapped TCX from JSON envelope. XML length:', tcxText.length);
+                }
+            } catch (_) {
+                // Not JSON — use responseText directly as XML
+            }
+
+            const lowerXml = (tcxText || '').toLowerCase();
+            const hasTrackpoints = lowerXml.includes('trackpoint');
+
+            if (hasTrackpoints) {
+                try {
+                    const { parseTcxFile } = await import('./tcxService');
+                    tcxResult = await parseTcxFile(tcxText);
+                    if (tcxResult?.activityStats) {
+                        tcxResult.activityStats.hasGps = tcxResult.activityStats.hasGps ?? (tcxResult.mapPolyline != null);
+                    }
+                    console.log('[GHealth] TCX export successful! GPS:', tcxResult.activityStats?.hasGps, 'Points:', tcxResult.streams?.time?.data?.length || 0);
+                    break;
+                } catch (parseErr) {
+                    console.warn('[GHealth] TCX parse error:', parseErr.message, '| Preview:', tcxText.slice(0, 300));
+                }
+            } else {
+                console.warn('[GHealth] TCX has no trackpoints. Preview:', tcxText.slice(0, 300));
+            }
+        } catch (e) {
+            console.warn('[GHealth] TCX export fetch error:', e.message);
         }
-    } catch (e) {
-        console.log('[GHealth] TCX export error:', e.message, '— will try HR fallback');
     }
 
     if (tcxResult) return tcxResult;
 
-    // ── Step 2: No GPS — fetch heart rate ─────────────────────────────────────
-    console.log('[GHealth] No GPS for this session. Fetching heart rate data…');
-    const hrSamples = await _fetchHeartRateForSession(accessToken, startIso, endIso);
-
-    if (hrSamples.length > 0) {
-        console.log(`[GHealth] Got ${hrSamples.length} heart rate samples. Building HR-only result.`);
-        return _buildHrOnlyResult(hrSamples, startMs, endMs);
-    }
-
-    // ── Step 3: No GPS & No HR — return basic session metadata ───────────────
-    console.log('[GHealth] No GPS or HR samples found. Returning basic session metadata.');
-    return _buildHrOnlyResult([], startMs, endMs);
+    // ── Step 2: No GPS — build from metricsSummary ────────────────────────────
+    // NOTE: The Google Health API v4 does not provide per-sample HR data points.
+    // Average HR, distance, and speed come from session.metricsSummary directly.
+    console.log('[GHealth] No GPS TCX found. Building result from session metricsSummary.');
+    return _buildHrOnlyResult([], startMs, endMs, session.metricsSummary);
 };
 
