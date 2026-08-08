@@ -456,19 +456,47 @@ export const fetchRecentSessions = async (uid, daysBack = 60) => {
     const timeThreshold = Date.now() - daysBack * 24 * 3600 * 1000;
 
     // NOTE: The Google Health API v4 filter for exercise.interval.end_time returns 400.
-    // Fetch unfiltered and apply client-side date filtering instead.
-    const response = await fetch(`${HEALTH_BASE}/dataTypes/exercise/dataPoints?pageSize=100`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    // Fetch unfiltered with pagination and apply client-side date filtering instead.
+    // We stop paginating as soon as a page contains sessions older than the threshold.
+    let allPoints = [];
+    let pageToken  = null;
+    let pageCount  = 0;
+    const MAX_PAGES = 20; // Safety cap — 20 × 100 = up to 2000 sessions
 
-    if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        console.error('[GHealth] fetchRecentSessions error:', err);
-        throw new Error(err.error?.message || `Google Health API error ${response.status}`);
-    }
+    do {
+        const url = new URL(`${HEALTH_BASE}/dataTypes/exercise/dataPoints`);
+        url.searchParams.set('pageSize', '100');
+        if (pageToken) url.searchParams.set('pageToken', pageToken);
 
-    const data = await response.json();
-    const points = (data.dataPoints || []).filter(p => {
+        const response = await fetch(url.toString(), {
+            headers: { Authorization: `Bearer ${accessToken}` },
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            console.error('[GHealth] fetchRecentSessions error:', err);
+            if (pageCount === 0) throw new Error(err.error?.message || `Google Health API error ${response.status}`);
+            break; // If a later page fails, return what we have so far
+        }
+
+        const data = await response.json();
+        const points = data.dataPoints || [];
+        allPoints = allPoints.concat(points);
+        pageToken = data.nextPageToken || null;
+        pageCount++;
+
+        // If the oldest session on this page is already before our threshold, stop paginating
+        const oldestOnPage = points.reduce((min, p) => {
+            const t = new Date(p.exercise?.interval?.endTime || 0).getTime();
+            return t < min ? t : min;
+        }, Infinity);
+        if (oldestOnPage < timeThreshold) break;
+
+    } while (pageToken && pageCount < MAX_PAGES);
+
+    console.log(`[GHealth] Fetched ${allPoints.length} raw session points across ${pageCount} page(s).`);
+
+    const points = allPoints.filter(p => {
         const endMs = new Date(p.exercise?.interval?.endTime || 0).getTime();
         return endMs >= timeThreshold;
     });
@@ -497,7 +525,7 @@ export const fetchRecentSessions = async (uid, daysBack = 60) => {
             return {
                 id:              realId,
                 name:            resolvedName,
-                activityType:    null,   // Not used for Health API (string names instead)
+                activityType:    null,
                 startTimeMillis: String(startMs),
                 endTimeMillis:   String(endMs),
                 metricsSummary:  p.exercise?.metricsSummary || null,
@@ -673,7 +701,21 @@ export const fetchSessionTelemetry = async (uid, session) => {
                     console.warn('[GHealth] TCX parse error:', parseErr.message, '| Preview:', tcxText.slice(0, 300));
                 }
             } else {
-                console.warn('[GHealth] TCX has no trackpoints. Preview:', tcxText.slice(0, 300));
+                // Activity-only TCX (manually logged session — no GPS/HR track recorded).
+                // Try to extract Notes for a better session name, then stop trying URLs.
+                try {
+                    const doc = new DOMParser().parseFromString(tcxText, 'text/xml');
+                    const notes = doc.querySelector('Notes')?.textContent?.trim();
+                    const sport = doc.querySelector('Activity')?.getAttribute('Sport');
+                    if (notes || sport) {
+                        console.log('[GHealth] Metadata-only TCX — Notes:', notes, '| Sport:', sport);
+                        // Attach extracted metadata to session for downstream use
+                        session._tcxNotes = notes || null;
+                        session._tcxSport = sport || null;
+                    }
+                } catch (_) { /* XML parse failed; ignore */ }
+                console.log('[GHealth] TCX has no trackpoints (manually-logged session). Using metricsSummary.');
+                break; // No need to try the second candidate URL — same result
             }
         } catch (e) {
             console.warn('[GHealth] TCX export fetch error:', e.message);
@@ -685,7 +727,11 @@ export const fetchSessionTelemetry = async (uid, session) => {
     // ── Step 2: No GPS — build from metricsSummary ────────────────────────────
     // NOTE: The Google Health API v4 does not provide per-sample HR data points.
     // Average HR, distance, and speed come from session.metricsSummary directly.
-    console.log('[GHealth] No GPS TCX found. Building result from session metricsSummary.');
+    // For manually-logged sessions, _tcxNotes may contain the user's session description.
+    if (session._tcxNotes) {
+        console.log('[GHealth] Using TCX Notes as session description:', session._tcxNotes);
+    }
+    console.log('[GHealth] Building result from session metricsSummary.');
     return _buildHrOnlyResult([], startMs, endMs, session.metricsSummary);
 };
 
