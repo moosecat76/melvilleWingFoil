@@ -64,13 +64,25 @@ const _exchangeToken = async (body) => {
         if (!CLIENT_SECRET_DEV) {
             throw new Error('Add VITE_GOOGLE_FIT_CLIENT_SECRET to your .env file for local dev.');
         }
+        // Google's OAuth2 token endpoint requires application/x-www-form-urlencoded, not JSON.
+        const formBody = new URLSearchParams({ ...body, client_id: CLIENT_ID, client_secret: CLIENT_SECRET_DEV });
         const response = await fetch(GOOGLE_TOKEN_URL, {
             method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ ...body, client_id: CLIENT_ID, client_secret: CLIENT_SECRET_DEV }),
+            body:    formBody,
         });
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error_description || data.error || 'Token exchange failed');
+        if (!response.ok) {
+            console.error('[GHealth] Token exchange failed. Google error:', JSON.stringify(data));
+            // invalid_grant = refresh token revoked / expired / wrong scopes.
+            // Clear stale tokens so the user isn't stuck in a retry loop.
+            if (data.error === 'invalid_grant') {
+                localStorage.removeItem(LS_ACCESS_TOKEN);
+                localStorage.removeItem(LS_REFRESH_TOKEN);
+                localStorage.removeItem(LS_EXPIRES_AT);
+                throw new Error('Google Health session expired. Please reconnect in Settings.');
+            }
+            throw new Error(data.error_description || data.error || 'Token exchange failed');
+        }
         return data;
     } else {
         const response = await fetch(TOKEN_API, {

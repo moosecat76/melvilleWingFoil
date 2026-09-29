@@ -71,10 +71,10 @@ export default async function handler(req, res) {
     console.log('[google-fit-token] Token exchange, grant_type:', grant_type);
 
     try {
+        // Google's OAuth2 token endpoint requires application/x-www-form-urlencoded, not JSON.
         const response = await fetch('https://oauth2.googleapis.com/token', {
             method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify(tokenBody),
+            body:    new URLSearchParams(tokenBody),
         });
 
         const data = await response.json();
