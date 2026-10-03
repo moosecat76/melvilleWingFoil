@@ -3,6 +3,7 @@ import React, { useEffect } from 'react';
 import { MapContainer, TileLayer, Polyline, Marker, Popup, CircleMarker } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+import { decodePolyline } from '../services/tcxService';
 
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
@@ -14,45 +15,6 @@ let DefaultIcon = L.icon({
     iconAnchor: [12, 41]
 });
 L.Marker.prototype.options.icon = DefaultIcon;
-
-// Simple Polyline Decoder
-const decodePolyline = (str, precision) => {
-    var index = 0,
-        lat = 0,
-        lng = 0,
-        coordinates = [],
-        shift = 0,
-        result = 0,
-        byte = null,
-        latitude_change,
-        longitude_change,
-        factor = Math.pow(10, precision || 5);
-
-    while (index < str.length) {
-        byte = null;
-        shift = 0;
-        result = 0;
-        do {
-            byte = str.charCodeAt(index++) - 63;
-            result |= (byte & 0x1f) << shift;
-            shift += 5;
-        } while (byte >= 0x20);
-        latitude_change = ((result & 1) ? ~(result >> 1) : (result >> 1));
-        shift = result = 0;
-        do {
-            byte = str.charCodeAt(index++) - 63;
-            result |= (byte & 0x1f) << shift;
-            shift += 5;
-        } while (byte >= 0x20);
-        longitude_change = ((result & 1) ? ~(result >> 1) : (result >> 1));
-        lat += latitude_change;
-        lng += longitude_change;
-        coordinates.push([lat / factor, lng / factor]);
-    }
-    return coordinates;
-};
-
-
 
 const SessionMap = ({ polyline, summary_polyline, streams, highlightIndex }) => {
     const encoded = polyline || summary_polyline;
@@ -86,7 +48,6 @@ const SessionMap = ({ polyline, summary_polyline, streams, highlightIndex }) => 
     };
 
     // Advanced speed-colored display
-    // Advanced speed-colored display
     const renderSpeedMap = () => {
         // Handle both Array (key_by_type=false) and Object (key_by_type=true) formats
         let latlngStream, velocityStream;
@@ -99,8 +60,17 @@ const SessionMap = ({ polyline, summary_polyline, streams, highlightIndex }) => 
             velocityStream = streams.velocity_smooth?.data;
         }
 
+        // If latlngStream is absent, reconstruct from the encoded polyline
+        if ((!latlngStream || latlngStream.length === 0) && encoded) {
+            try {
+                latlngStream = decodePolyline(encoded);
+            } catch (e) {
+                console.error('[SessionMap] Failed to decode polyline for speed map:', e);
+            }
+        }
+
         // If data is missing, fallback to simple map
-        if (!latlngStream || !velocityStream) {
+        if (!latlngStream || !velocityStream || latlngStream.length < 2 || velocityStream.length === 0) {
             return renderSimpleMap();
         }
 
@@ -126,7 +96,9 @@ const SessionMap = ({ polyline, summary_polyline, streams, highlightIndex }) => 
         for (let i = MAP_SAMPLE_RATE; i < latlngStream.length; i += MAP_SAMPLE_RATE) {
             const p1 = latlngStream[i - MAP_SAMPLE_RATE];
             const p2 = latlngStream[i];
-            const speedMs = (velocityStream[i - MAP_SAMPLE_RATE] + velocityStream[i]) / 2;
+            const idx1 = Math.min(i - MAP_SAMPLE_RATE, velocityStream.length - 1);
+            const idx2 = Math.min(i, velocityStream.length - 1);
+            const speedMs = ((velocityStream[idx1] ?? 0) + (velocityStream[idx2] ?? 0)) / 2;
             
             let bucketName;
             if (speedMs < 0.2) bucketName = 'stopped';

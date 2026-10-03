@@ -26,30 +26,149 @@ import {
     serverTimestamp,
 } from 'firebase/firestore';
 import { db } from './firebaseSetup';
+import { encodePolyline, decodePolyline } from './tcxService';
+
+// ─── Firestore Data Sanitization & Preparation ──────
+/**
+ * Recursively sanitize objects so Firestore never encounters:
+ * 1. undefined values (rejected by Firestore)
+ * 2. Nested arrays (e.g. array of arrays, or array containing objects that contain arrays)
+ */
+export const sanitizeForFirestore = (data) => {
+    if (data === undefined) return null;
+    if (data === null || typeof data !== 'object') return data;
+    if (data instanceof Date) return data;
+    if (typeof data.toMillis === 'function' || data._methodName) return data;
+
+    if (Array.isArray(data)) {
+        return data.map(item => {
+            if (Array.isArray(item)) {
+                // Nested array: convert coordinate pairs [lat, lng] to objects { lat, lng }
+                if (item.length === 2 && typeof item[0] === 'number' && typeof item[1] === 'number') {
+                    return { lat: item[0], lng: item[1] };
+                }
+                return JSON.stringify(item);
+            }
+            if (item && typeof item === 'object') {
+                const cleaned = {};
+                for (const [k, v] of Object.entries(item)) {
+                    if (Array.isArray(v)) {
+                        // An object inside an array cannot contain another array in Firestore
+                        cleaned[k] = JSON.stringify(v);
+                    } else {
+                        cleaned[k] = sanitizeForFirestore(v);
+                    }
+                }
+                return cleaned;
+            }
+            return sanitizeForFirestore(item);
+        });
+    }
+
+    const result = {};
+    for (const [key, value] of Object.entries(data)) {
+        if (value === undefined) continue;
+        result[key] = sanitizeForFirestore(value);
+    }
+    return result;
+};
+
+/**
+ * Prepares a journal entry for writing to Firestore:
+ * - Normalizes streams from array (Strava) to map format
+ * - Encodes latlng coordinates into mapPolyline if needed
+ * - Removes raw latlng nested arrays from streams to comply with Firestore
+ * - Deep sanitizes against any nested arrays or undefined values
+ */
+export const prepareJournalEntryForFirestore = (entry) => {
+    if (!entry || typeof entry !== 'object') return entry;
+    const { id, ...copy } = entry;
+
+    if (copy.streams) {
+        let streamsObj = copy.streams;
+
+        // If Strava array format: [{ type: 'time', data: [...] }] -> { time: { data: [...] } }
+        if (Array.isArray(streamsObj)) {
+            const mapped = {};
+            for (const s of streamsObj) {
+                if (s && s.type && s.data) {
+                    mapped[s.type] = { data: s.data };
+                }
+            }
+            streamsObj = mapped;
+        } else {
+            streamsObj = { ...streamsObj };
+        }
+
+        // Handle latlng stream: encode to mapPolyline and remove from Firestore doc to avoid nested arrays
+        if (streamsObj.latlng?.data) {
+            if (!copy.mapPolyline && Array.isArray(streamsObj.latlng.data) && streamsObj.latlng.data.length > 0) {
+                try {
+                    copy.mapPolyline = encodePolyline(streamsObj.latlng.data);
+                } catch (e) {
+                    console.warn('[DB] Failed to encode polyline from latlng stream:', e);
+                }
+            }
+            // Remove raw latlng stream from Firestore payload
+            delete streamsObj.latlng;
+        }
+
+        copy.streams = streamsObj;
+    }
+
+    return sanitizeForFirestore(copy);
+};
+
+/**
+ * Hydrates a journal entry when loaded from Firestore:
+ * - Reconstructs streams.latlng in-memory from mapPolyline if missing
+ */
+export const hydrateJournalEntry = (entry) => {
+    if (!entry || typeof entry !== 'object') return entry;
+    const hydrated = { ...entry };
+
+    if (hydrated.mapPolyline && hydrated.streams && !hydrated.streams.latlng) {
+        try {
+            const coords = decodePolyline(hydrated.mapPolyline);
+            if (coords && coords.length > 0) {
+                hydrated.streams = {
+                    ...hydrated.streams,
+                    latlng: { data: coords },
+                };
+            }
+        } catch (e) {
+            console.warn('[DB] Could not decode polyline for entry:', hydrated.id, e);
+        }
+    }
+
+    return hydrated;
+};
 
 // ─── Journal Entries ────────────────────────────────
 const journalCol = (uid) => collection(db, 'users', uid, 'journal_entries');
 
 export const getJournalEntries = async (uid) => {
     const snap = await getDocs(query(journalCol(uid), orderBy('date', 'desc')));
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return snap.docs.map((d) => hydrateJournalEntry({ id: d.id, ...d.data() }));
 };
 
 export const addJournalEntry = async (uid, entry) => {
-    // Retain streams so maps work properly on load
+    const prepared = prepareJournalEntryForFirestore(entry);
     const newEntry = {
         date: new Date().toISOString(),
-        ...entry,
+        ...prepared,
         createdAt: serverTimestamp(),
     };
     const ref = await addDoc(journalCol(uid), newEntry);
-    return { id: ref.id, ...newEntry };
+    // Return original entry combined with server id and timestamps
+    return { ...entry, id: ref.id, ...newEntry };
 };
 
 export const updateJournalEntry = async (uid, entryId, data) => {
+    const prepared = prepareJournalEntryForFirestore(data);
     const ref = doc(db, 'users', uid, 'journal_entries', entryId);
-    await updateDoc(ref, { ...data, updatedAt: serverTimestamp() });
-    return { id: entryId, ...data };
+    await updateDoc(ref, { ...prepared, updatedAt: serverTimestamp() });
+    return { ...data, id: entryId };
 };
 
 export const deleteJournalEntry = async (uid, entryId) => {
@@ -60,7 +179,7 @@ export const getEntriesForLocation = async (uid, locationId) => {
     const snap = await getDocs(
         query(journalCol(uid), where('locationId', '==', locationId))
     );
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return snap.docs.map((d) => hydrateJournalEntry({ id: d.id, ...d.data() }));
 };
 
 // ─── User Gear ──────────────────────────────────────
@@ -166,9 +285,9 @@ export const migrateLocalStorageToFirestore = async (uid) => {
             for (const entry of entries) {
                 const isDuplicate = existing.some(e => e.date === entry.date && e.notes === entry.notes);
                 if (!isDuplicate) {
-                    const { id, ...rest } = entry; // Strip local ID
+                    const prepared = prepareJournalEntryForFirestore(entry);
                     try {
-                        await addDoc(journalCol(uid), rest);
+                        await addDoc(journalCol(uid), prepared);
                         added++;
                     } catch (err) {
                         console.error('Failed to migrate journal entry:', entry.date, err.code, err.message);
@@ -251,9 +370,9 @@ export const restoreBackupToFirestore = async (uid, backupData) => {
         for (const entry of entries) {
             const isDuplicate = existing.some(e => e.date === entry.date && e.notes === entry.notes);
             if (!isDuplicate) {
-                const { id, ...rest } = entry; // Strip local ID
+                const prepared = prepareJournalEntryForFirestore(entry);
                 try {
-                    await addDoc(journalCol(uid), rest);
+                    await addDoc(journalCol(uid), prepared);
                     added++;
                 } catch (err) {
                     console.error('Failed to restore journal entry:', entry.date, err.code, err.message);

@@ -32,10 +32,15 @@ const _encodeNum = (num) => {
 };
 
 export const encodePolyline = (latLngPairs) => {
+    if (!latLngPairs || !Array.isArray(latLngPairs)) return '';
     let result = '';
     let prevLat = 0;
     let prevLng = 0;
-    for (const [lat, lng] of latLngPairs) {
+    for (const pt of latLngPairs) {
+        if (!pt) continue;
+        const lat = Array.isArray(pt) ? pt[0] : (pt.lat ?? pt.latitude);
+        const lng = Array.isArray(pt) ? pt[1] : (pt.lng ?? pt.longitude);
+        if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) continue;
         const dLat = Math.round((lat - prevLat) * 1e5);
         const dLng = Math.round((lng - prevLng) * 1e5);
         result += _encodeNum(dLat) + _encodeNum(dLng);
@@ -43,6 +48,44 @@ export const encodePolyline = (latLngPairs) => {
         prevLng = lng;
     }
     return result;
+};
+
+// ─── Google Polyline decoder ──────────────────────────────────────────────────
+export const decodePolyline = (str, precision = 5) => {
+    if (!str || typeof str !== 'string') return [];
+    let index = 0,
+        lat = 0,
+        lng = 0,
+        coordinates = [],
+        shift = 0,
+        result = 0,
+        byte = null,
+        latitude_change,
+        longitude_change,
+        factor = Math.pow(10, precision || 5);
+
+    while (index < str.length) {
+        byte = null;
+        shift = 0;
+        result = 0;
+        do {
+            byte = str.charCodeAt(index++) - 63;
+            result |= (byte & 0x1f) << shift;
+            shift += 5;
+        } while (byte >= 0x20);
+        latitude_change = ((result & 1) ? ~(result >> 1) : (result >> 1));
+        shift = result = 0;
+        do {
+            byte = str.charCodeAt(index++) - 63;
+            result |= (byte & 0x1f) << shift;
+            shift += 5;
+        } while (byte >= 0x20);
+        longitude_change = ((result & 1) ? ~(result >> 1) : (result >> 1));
+        lat += latitude_change;
+        lng += longitude_change;
+        coordinates.push([lat / factor, lng / factor]);
+    }
+    return coordinates;
 };
 
 // ─── 5-point moving-average speed smoother ────────────────────────────────────
