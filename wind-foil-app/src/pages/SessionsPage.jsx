@@ -188,7 +188,7 @@ const SessionsPage = () => {
             mapPolyline: entry.mapPolyline || null,
             streams: entry.streams || null,
             activityStats: entry.activityStats || null,
-            foilAnalysis: entry.foilAnalysis || null
+            foilAnalysis: (entry.streams && (!entry.foilAnalysis || !entry.foilAnalysis.adaptiveProfile)) ? analyzeSession(entry.streams) : (entry.foilAnalysis || null)
         });
         setTcxFileName(entry.mapPolyline ? 'Saved track' : null);
         setIsAdding(true);
@@ -247,7 +247,7 @@ const SessionsPage = () => {
         setGfitLoading(true);
         setGfitSessions(null);
         try {
-            const sessions = await fetchRecentSessions(user?.uid, 5);
+            const sessions = await fetchRecentSessions(user?.uid, 10);
             setGfitSessions(sessions);
         } catch (e) {
             console.error('[GHealth] fetchRecentSessions error:', e);
@@ -304,9 +304,9 @@ const SessionsPage = () => {
     // Get foil stats for a quick summary line
     const getQuickStats = (entry) => {
         let analysis = entry.foilAnalysis;
-        if (!analysis && entry.streams) {
+        if (entry.streams && (!analysis || !analysis.adaptiveProfile)) {
             // Don't recompute on every render — just show basic stats
-            return null;
+            return analyzeSession(entry.streams);
         }
         return analysis;
     };
@@ -532,7 +532,7 @@ const SessionsPage = () => {
                                         >
                                             <span style={{ fontSize: '1.2rem' }}>🏃</span>
                                             {gfitLoading ? 'Loading sessions…' : 'Fetch from Google Health'}
-                                            <span style={{ marginLeft: 'auto', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 400 }}>last 5 days</span>
+                                            <span style={{ marginLeft: 'auto', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 400 }}>last 10 days</span>
                                         </button>
 
                                         {/* Session list */}
@@ -540,7 +540,7 @@ const SessionsPage = () => {
                                             <div style={{ maxHeight: '240px', overflowY: 'auto', borderTop: '1px solid var(--border-color)' }}>
                                                 {gfitSessions.length === 0 ? (
                                                     <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                                                        No sessions found in the last 5 days.
+                                                        No sessions found in the last 10 days.
                                                     </div>
                                                 ) : (
                                                     gfitSessions.map(session => {
@@ -719,8 +719,9 @@ const SessionsPage = () => {
                                             <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading chart…</div>}>
                                                 <FoilAnalysisChart analysisData={newEntry.foilAnalysis} onHover={setHoveredIndex} />
                                             </Suspense>
-                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginTop: '12px' }}>
-                                                {[{ label: 'Foil Time', value: `${newEntry.foilAnalysis.stats.totalFoilTime}m`, color: '#5cb85c' },
+                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(95px, 1fr))', gap: '8px', marginTop: '12px' }}>
+                                                {[{ label: 'Top Speed',    value: `${newEntry.activityStats?.topSpeed || newEntry.foilAnalysis.stats.topSpeed || '–'} kts`, color: 'var(--accent-primary)' },
+                                                  { label: 'Time on Foil', value: `${newEntry.foilAnalysis.stats.totalFoilTime}m`, color: '#5cb85c' },
                                                   { label: 'Flights',   value: newEntry.foilAnalysis.stats.numberOfFlights,       color: 'white' },
                                                   { label: '% Foil',    value: `${newEntry.foilAnalysis.stats.percentFoil}%`,     color: '#38bdf8' },
                                                   { label: 'Runs',      value: newEntry.foilAnalysis.stats.totalRuns,             color: '#facc15' },
@@ -800,7 +801,10 @@ const SessionsPage = () => {
                                         {/* Foil stats summary inline */}
                                         {analysis && (
                                             <div style={{ display: 'flex', gap: '12px', marginTop: '6px', fontSize: '0.8rem' }}>
-                                                <span style={{ color: '#5cb85c' }}><b>{analysis.stats.totalFoilTime}m</b> Foil</span>
+                                                {(entry.activityStats?.topSpeed || analysis.stats?.topSpeed) && (
+                                                    <span style={{ color: 'var(--accent-primary)' }}><b>{entry.activityStats?.topSpeed || analysis.stats.topSpeed} kts</b> Top Speed</span>
+                                                )}
+                                                <span style={{ color: '#5cb85c' }}><b>{analysis.stats.totalFoilTime}m</b> Time on Foil</span>
                                                 <span style={{ color: '#38bdf8' }}><b>{analysis.stats.percentFoil}%</b></span>
                                                 <span style={{ color: '#facc15' }}><b>{analysis.stats.totalRuns}</b> Runs</span>
                                                 <span><b>{analysis.stats.numberOfFlights}</b> Flights</span>

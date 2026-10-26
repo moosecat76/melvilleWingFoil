@@ -459,10 +459,10 @@ export const sessionEmoji = (label = '') => {
  * Each data point represents one exercise session (workout).
  *
  * @param {string} uid      - Firebase UID (for token refresh)
- * @param {number} daysBack - How many days to look back (default 5)
+ * @param {number} daysBack - How many days to look back (default 10)
  * @returns {Promise<Array>} Array of normalised session objects, newest first
  */
-export const fetchRecentSessions = async (uid, daysBack = 5) => {
+export const fetchRecentSessions = async (uid, daysBack = 10) => {
     const accessToken = await getGoogleFitAccessToken(uid);
 
     const timeThreshold = Date.now() - daysBack * 24 * 3600 * 1000;

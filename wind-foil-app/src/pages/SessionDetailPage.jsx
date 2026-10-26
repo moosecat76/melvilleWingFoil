@@ -26,7 +26,7 @@ const SessionDetailPage = () => {
                 setEntry(found);
                 // Compute analysis
                 let a = found.foilAnalysis;
-                if (!a && found.streams) {
+                if (found.streams && (!a || !a.adaptiveProfile)) {
                     a = analyzeSession(found.streams);
                 }
                 setAnalysis(a);
@@ -134,9 +134,13 @@ const SessionDetailPage = () => {
             {analysis && (
                 <div className="glass-panel" style={{ padding: '16px', marginBottom: '1.5rem' }}>
                     <h3 style={{ margin: '0 0 12px 0', fontSize: '1rem', fontWeight: 600 }}>Foil Analysis</h3>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '8px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '8px' }}>
                         <div style={{ background: 'rgba(0,0,0,0.3)', padding: '12px', borderRadius: '8px', textAlign: 'center' }}>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Foil Time</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Top Speed</div>
+                            <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--accent-primary)' }}>{stats.topSpeed || analysis.stats.topSpeed || '–'} <span style={{ fontSize: '0.75rem', fontWeight: 400 }}>kts</span></div>
+                        </div>
+                        <div style={{ background: 'rgba(0,0,0,0.3)', padding: '12px', borderRadius: '8px', textAlign: 'center' }}>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Time on Foil</div>
                             <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#5cb85c' }}>{analysis.stats.totalFoilTime}m</div>
                         </div>
                         <div style={{ background: 'rgba(0,0,0,0.3)', padding: '12px', borderRadius: '8px', textAlign: 'center' }}>

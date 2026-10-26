@@ -1,3 +1,7 @@
+# Dependencies
+node_modules/
+wind-foil-app/node_modules/
+
 # Local environment files
 wind-foil-app/.env
 wind-foil-app/.env.local
