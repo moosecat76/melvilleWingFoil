@@ -206,6 +206,35 @@ export const hydrateJournalEntry = (entry) => {
     return hydrated;
 };
 
+/**
+ * Checks if two journal entries refer to the same logged session.
+ * Matches on id, or on identical normalized date + notes.
+ */
+export const isSameJournalEntry = (a, b) => {
+    if (!a || !b) return false;
+    if (a.id && b.id && String(a.id) === String(b.id)) return true;
+    const dateA = normalizeEntryDate(a) || a.date;
+    const dateB = normalizeEntryDate(b) || b.date;
+    return !!(dateA && dateB && dateA === dateB && (a.notes || '').trim() === (b.notes || '').trim());
+};
+
+/**
+ * Union two lists of settings items (gear / locations) by id (or JSON content when no id).
+ * Items in `primary` win on conflict; nothing from either list is ever dropped.
+ */
+export const mergeItemLists = (primary = [], secondary = []) => {
+    const keyOf = (item) => (item && item.id != null ? `id:${item.id}` : `json:${JSON.stringify(item)}`);
+    const merged = [];
+    const seen = new Set();
+    for (const item of [...(Array.isArray(primary) ? primary : []), ...(Array.isArray(secondary) ? secondary : [])]) {
+        const k = keyOf(item);
+        if (seen.has(k)) continue;
+        seen.add(k);
+        merged.push(item);
+    }
+    return merged;
+};
+
 // ─── Journal Entries ────────────────────────────────
 const journalCol = (uid) => collection(db, 'users', uid, 'journal_entries');
 
@@ -428,6 +457,11 @@ export const migrateLocalStorageToFirestore = async (uid) => {
 };
 
 // ─── Restore backup directly to Firestore ────────────
+/**
+ * Additive restore: merges a backup into Firestore and NEVER deletes or overwrites
+ * existing cloud data. Sessions already present (same id, or same date + notes) are skipped;
+ * gear and locations are unioned with what is already in the cloud.
+ */
 export const restoreBackupToFirestore = async (uid, backupData) => {
     console.log('Starting Cloud Restore for UID:', uid);
 
@@ -436,51 +470,55 @@ export const restoreBackupToFirestore = async (uid, backupData) => {
         let entries = backupData.wind_foil_journal_entries;
         if (typeof entries === 'string') entries = JSON.parse(entries);
 
-        let existing = [];
-        try {
-            existing = await getJournalEntries(uid);
-        } catch (e) {
-            console.warn('Could not fetch existing journal entries. Will push blindly.', e);
-        }
+        // Abort rather than push blindly: a failed fetch must never cause duplicates.
+        const existing = await getJournalEntries(uid);
 
         let added = 0;
         for (const entry of entries) {
-            const isDuplicate = existing.some(e => e.date === entry.date && e.notes === entry.notes);
-            if (!isDuplicate) {
-                const prepared = prepareJournalEntryForFirestore(entry);
-                try {
-                    await addDoc(journalCol(uid), prepared);
-                    added++;
-                } catch (err) {
-                    console.error('Failed to restore journal entry:', entry.date, err.code, err.message);
-                }
+            if (existing.some(e => isSameJournalEntry(e, entry))) continue;
+            const prepared = prepareJournalEntryForFirestore(entry);
+            // Server-managed timestamps from an export are not meaningful in a new document
+            delete prepared.createdAt;
+            delete prepared.updatedAt;
+            try {
+                await addDoc(journalCol(uid), { ...prepared, createdAt: serverTimestamp() });
+                existing.push(entry); // also guards against duplicates inside the backup file itself
+                added++;
+            } catch (err) {
+                console.error('Failed to restore journal entry:', entry.date, err.code, err.message);
             }
         }
         console.log(`Restored ${added} new journal entries to Firestore`);
     }
 
-    // 2. Gear
+    // 2. Gear — union with cloud (cloud wins on conflicts)
     if (backupData.melvill_user_gear || backupData.user_gear) {
         let gear = backupData.melvill_user_gear || backupData.user_gear;
         if (typeof gear === 'string') gear = JSON.parse(gear);
         if (Array.isArray(gear)) {
-            await saveUserGear(uid, gear);
-            console.log('Restored Gear to Firestore');
+            const cloudGear = await getUserGear(uid);
+            await saveUserGear(uid, mergeItemLists(cloudGear, gear));
+            console.log('Merged Gear into Firestore');
         }
     }
 
-    // 3. Locations
+    // 3. Locations — union with cloud (cloud wins on conflicts)
     if (backupData.locations) {
         let locs = backupData.locations;
         if (typeof locs === 'string') locs = JSON.parse(locs);
         if (Array.isArray(locs)) {
-            await saveUserLocations(uid, locs);
-            console.log('Restored Locations to Firestore');
+            const cloudLocs = await getUserLocations(uid);
+            await saveUserLocations(uid, mergeItemLists(cloudLocs || [], locs));
+            console.log('Merged Locations into Firestore');
         }
     }
 
+    // Only adopt the backup's current location if none is set yet
     if (backupData.currentLocationId) {
-        await saveCurrentLocationId(uid, backupData.currentLocationId);
-        console.log('Restored Current Location ID');
+        const cloudCurrent = await getCurrentLocationId(uid);
+        if (!cloudCurrent) {
+            await saveCurrentLocationId(uid, backupData.currentLocationId);
+            console.log('Restored Current Location ID');
+        }
     }
 };

@@ -141,7 +141,7 @@ const SessionDetailPage = () => {
                         </div>
                         <div style={{ background: 'rgba(0,0,0,0.3)', padding: '12px', borderRadius: '8px', textAlign: 'center' }}>
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Time on Foil</div>
-                            <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#5cb85c' }}>{analysis.stats.totalFoilTime}m</div>
+                            <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#5cb85c' }}>{analysis.stats.totalFoilTime}m</div></div><div style={{ background: 'rgba(0,0,0,0.3)', padding: '12px', borderRadius: '8px', textAlign: 'center' }}><div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Distance</div><div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'white' }}>{(stats.distance || analysis.stats.totalDistance) ? parseFloat(stats.distance || analysis.stats.totalDistance).toFixed(2) : '–'} <span style={{ fontSize: '0.75rem', fontWeight: 400 }}>km</span></div>
                         </div>
                         <div style={{ background: 'rgba(0,0,0,0.3)', padding: '12px', borderRadius: '8px', textAlign: 'center' }}>
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Flights</div>

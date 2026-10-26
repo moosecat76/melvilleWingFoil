@@ -457,6 +457,17 @@ export const analyzeSession = (streams) => {
     const topSpeedKts = (maxSpeedMs * 1.94384).toFixed(1);
     const topSpeedMs = maxSpeedMs.toFixed(1);
 
+    // Total distance covered (km): integrate speed over time, skipping the t=0 GPS lock artifact
+    let totalDistanceM = 0;
+    for (let i = 1; i < timeStream.length; i++) {
+        const dt = timeStream[i] - timeStream[i - 1];
+        const v = velocityStream[i];
+        if (dt > 0 && dt < 30 && !isNaN(v) && v < 30) {
+            totalDistanceM += v * dt;
+        }
+    }
+    const totalDistanceKm = (totalDistanceM / 1000).toFixed(2);
+
     return {
         mode: hasValidAltitude ? 'altitude' : 'speed',
         adaptiveThreshold: adaptiveProfile?.foilEntrySpeed || null,
@@ -469,6 +480,7 @@ export const analyzeSession = (streams) => {
             totalFoilTime: (totalFoilTimeSeconds / 60).toFixed(1), // minutes
             topSpeed: topSpeedKts,
             topSpeedMs,
+            totalDistance: totalDistanceKm,
             numberOfFlights,
             percentFoil,
             totalRuns

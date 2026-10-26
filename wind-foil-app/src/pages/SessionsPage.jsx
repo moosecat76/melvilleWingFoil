@@ -753,6 +753,7 @@ const SessionsPage = () => {
                                             </Suspense>
                                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(95px, 1fr))', gap: '8px', marginTop: '12px' }}>
                                                 {[{ label: 'Top Speed',    value: `${newEntry.activityStats?.topSpeed || newEntry.foilAnalysis.stats.topSpeed || '–'} kts`, color: 'var(--accent-primary)' },
+                                                  { label: 'Distance',     value: `${(newEntry.activityStats?.distance || newEntry.foilAnalysis.stats.totalDistance) ? parseFloat(newEntry.activityStats?.distance || newEntry.foilAnalysis.stats.totalDistance).toFixed(2) : '–'} km`, color: 'white' },
                                                   { label: 'Time on Foil', value: `${newEntry.foilAnalysis.stats.totalFoilTime}m`, color: '#5cb85c' },
                                                   { label: 'Flights',   value: newEntry.foilAnalysis.stats.numberOfFlights,       color: 'white' },
                                                   { label: '% Foil',    value: `${newEntry.foilAnalysis.stats.percentFoil}%`,     color: '#38bdf8' },
@@ -840,6 +841,9 @@ const SessionsPage = () => {
                                             <div style={{ display: 'flex', gap: '12px', marginTop: '6px', fontSize: '0.8rem', flexWrap: 'wrap' }}>
                                                 {(entry.activityStats?.topSpeed || analysis.stats?.topSpeed) && (
                                                     <span style={{ color: 'var(--accent-primary)' }}><b>{entry.activityStats?.topSpeed || analysis.stats.topSpeed} kts</b> Top Speed</span>
+                                                )}
+                                                {(entry.activityStats?.distance || analysis.stats?.totalDistance) && (
+                                                    <span><b>{parseFloat(entry.activityStats?.distance || analysis.stats.totalDistance).toFixed(2)} km</b> Distance</span>
                                                 )}
                                                 <span style={{ color: '#5cb85c' }}><b>{analysis.stats.totalFoilTime}m</b> Time on Foil</span>
                                                 <span style={{ color: '#38bdf8' }}><b>{analysis.stats.percentFoil}%</b></span>

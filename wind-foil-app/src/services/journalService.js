@@ -6,6 +6,7 @@ import {
     getEntriesForLocation as dbGetEntriesForLocation,
     hydrateJournalEntry,
     normalizeEntryDate,
+    isSameJournalEntry,
 } from './dbService';
 
 const STORAGE_KEY = 'wind_foil_journal_entries';
@@ -13,16 +14,7 @@ const STORAGE_KEY = 'wind_foil_journal_entries';
 /**
  * Checks if two journal entries refer to the same logged session.
  */
-const isSameEntry = (a, b) => {
-    if (!a || !b) return false;
-    if (a.id && b.id && String(a.id) === String(b.id)) return true;
-    const dateA = normalizeEntryDate(a) || a.date;
-    const dateB = normalizeEntryDate(b) || b.date;
-    if (dateA && dateB && dateA === dateB && (a.notes || '').trim() === (b.notes || '').trim()) {
-        return true;
-    }
-    return false;
-};
+const isSameEntry = (a, b) => isSameJournalEntry(a, b);
 
 const getLocalEntries = () => {
     try {

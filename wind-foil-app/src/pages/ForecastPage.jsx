@@ -512,7 +512,7 @@ const ForecastPage = () => {
                         <Database size={20} /> Data & Settings
                     </h3>
                     <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '1rem' }}>
-                        <button onClick={exportData} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <button onClick={() => exportData(user?.uid)} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <Download size={16} /> Export Data
                         </button>
                         <div style={{ position: 'relative' }}>
