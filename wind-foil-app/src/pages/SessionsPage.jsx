@@ -247,7 +247,7 @@ const SessionsPage = () => {
         setGfitLoading(true);
         setGfitSessions(null);
         try {
-            const sessions = await fetchRecentSessions(user?.uid, 60);
+            const sessions = await fetchRecentSessions(user?.uid, 5);
             setGfitSessions(sessions);
         } catch (e) {
             console.error('[GHealth] fetchRecentSessions error:', e);
@@ -532,7 +532,7 @@ const SessionsPage = () => {
                                         >
                                             <span style={{ fontSize: '1.2rem' }}>🏃</span>
                                             {gfitLoading ? 'Loading sessions…' : 'Fetch from Google Health'}
-                                            <span style={{ marginLeft: 'auto', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 400 }}>last 60 days</span>
+                                            <span style={{ marginLeft: 'auto', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 400 }}>last 5 days</span>
                                         </button>
 
                                         {/* Session list */}
@@ -540,7 +540,7 @@ const SessionsPage = () => {
                                             <div style={{ maxHeight: '240px', overflowY: 'auto', borderTop: '1px solid var(--border-color)' }}>
                                                 {gfitSessions.length === 0 ? (
                                                     <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                                                        No sessions found in the last 60 days.
+                                                        No sessions found in the last 5 days.
                                                     </div>
                                                 ) : (
                                                     gfitSessions.map(session => {
