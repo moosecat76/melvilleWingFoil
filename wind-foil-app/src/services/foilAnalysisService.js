@@ -181,8 +181,8 @@ export const analyzeSession = (streams) => {
     }
 
     // Check if streams actually contain valid motion
-    const hasVelocity = velocityStream.some(v => v > 0);
-    const nonZeroAlts = altitudeStream.filter(a => a !== 0 && !isNaN(a));
+    const hasVelocity = velocityStream.some(v => typeof v === 'number' && v > 0);
+    const nonZeroAlts = altitudeStream.filter(a => typeof a === 'number' && !isNaN(a) && a !== 0);
     const altRange = nonZeroAlts.length > 1 ? (Math.max(...nonZeroAlts) - Math.min(...nonZeroAlts)) : 0;
     const hasValidAltitude = nonZeroAlts.length > 0 && altRange > 0.1;
 
@@ -403,8 +403,9 @@ export const analyzeSession = (streams) => {
             const prev = mergedSegments[mergedSegments.length - 1];
             const gapSeconds = timeStream[seg.start] - timeStream[prev.end];
             if (gapSeconds <= 3) {
+                const prevEnd = prev.end;
                 prev.end = seg.end;
-                for (let k = prev.end; k <= seg.start; k++) {
+                for (let k = prevEnd; k <= seg.start; k++) {
                     pointStates[k] = 'foiling';
                 }
             } else {

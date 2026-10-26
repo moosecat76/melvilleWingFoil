@@ -4,6 +4,7 @@ import {
     sanitizeForFirestore,
     prepareJournalEntryForFirestore,
     hydrateJournalEntry,
+    normalizeEntryDate,
 } from '../dbService';
 
 describe('Polyline Encoder & Decoder', () => {
@@ -175,5 +176,47 @@ describe('Firestore Sanitizer & Preparation', () => {
         expect(hydrated.streams.latlng).toBeDefined();
         expect(hydrated.streams.latlng.data.length).toBe(2);
         expect(hydrated.streams.latlng.data[0][0]).toBeCloseTo(-32.01234, 4);
+    });
+
+    it('strips heavy redundant arrays from foilAnalysis on save and reconstructs them on hydrate', () => {
+        const entry = {
+            id: 'doc-456',
+            date: '2026-02-28T03:47:00.000Z',
+            streams: {
+                time: { data: [0, 1, 2, 3, 4, 5] },
+                velocity_smooth: { data: [0.5, 1.0, 2.5, 2.8, 3.0, 2.7] },
+                altitude: { data: [0, 0, 0, 0, 0, 0] },
+            },
+            foilAnalysis: {
+                stats: { totalFoilTime: '0.1', numberOfFlights: 1, percentFoil: '80', totalRuns: 1 },
+                data: {
+                    time: [0, 1, 2, 3, 4, 5],
+                    velocity: [0.5, 1.0, 2.5, 2.8, 3.0, 2.7],
+                    altitude: [0, 0, 0, 0, 0, 0],
+                },
+                dynamicBaseline: [0, 0, 0, 0, 0, 0],
+                pointStates: ['sailing', 'sailing', 'foiling', 'foiling', 'foiling', 'foiling'],
+            },
+        };
+
+        const prepared = prepareJournalEntryForFirestore(entry);
+        expect(prepared.foilAnalysis.data).toBeUndefined();
+        expect(prepared.foilAnalysis.dynamicBaseline).toBeUndefined();
+        expect(prepared.foilAnalysis.pointStates).toBeUndefined();
+        expect(prepared.foilAnalysis.stats).toBeDefined();
+
+        const hydrated = hydrateJournalEntry(prepared);
+        expect(hydrated.foilAnalysis).toBeDefined();
+        expect(hydrated.foilAnalysis.data).toBeDefined();
+        expect(hydrated.foilAnalysis.data.velocity.length).toBe(6);
+        expect(hydrated.foilAnalysis.adaptiveProfile).toBeDefined();
+        expect(hydrated.foilAnalysis.stats.topSpeed).toBeDefined();
+    });
+
+    it('normalizes various date formats including Firestore Timestamps', () => {
+        expect(normalizeEntryDate({ date: '2026-02-28T03:47:00.000Z' })).toBe('2026-02-28T03:47:00.000Z');
+        expect(normalizeEntryDate({ date: { toDate: () => new Date('2026-02-22T08:06:00.000Z') } })).toBe('2026-02-22T08:06:00.000Z');
+        expect(normalizeEntryDate({ date: { seconds: 1771747560 } })).toBe(new Date(1771747560 * 1000).toISOString());
+        expect(normalizeEntryDate({ activityStats: { startTime: '2026-01-31T08:46:00.000Z' } })).toBe('2026-01-31T08:46:00.000Z');
     });
 });

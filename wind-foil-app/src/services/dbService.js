@@ -27,6 +27,38 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebaseSetup';
 import { encodePolyline, decodePolyline } from './tcxService';
+import { analyzeSession } from './foilAnalysisService';
+
+/**
+ * Normalizes an entry's date field (ISO string, Firestore Timestamp, epoch ms, or activityStats.startTime)
+ * into a valid ISO 8601 string.
+ */
+export const normalizeEntryDate = (entry) => {
+    if (!entry || typeof entry !== 'object') return null;
+    const raw = entry.date ?? entry.activityStats?.startTime ?? entry.createdAt;
+    if (!raw) return null;
+    if (typeof raw === 'string') {
+        const ms = Date.parse(raw);
+        return !isNaN(ms) ? new Date(ms).toISOString() : raw;
+    }
+    if (typeof raw.toDate === 'function') {
+        try {
+            return raw.toDate().toISOString();
+        } catch (_) {
+            return null;
+        }
+    }
+    if (typeof raw.seconds === 'number') {
+        return new Date(raw.seconds * 1000).toISOString();
+    }
+    if (raw instanceof Date && !isNaN(raw.getTime())) {
+        return raw.toISOString();
+    }
+    if (typeof raw === 'number' && !isNaN(raw)) {
+        return new Date(raw).toISOString();
+    }
+    return null;
+};
 
 // ─── Firestore Data Sanitization & Preparation ──────
 /**
@@ -84,6 +116,11 @@ export const prepareJournalEntryForFirestore = (entry) => {
     if (!entry || typeof entry !== 'object') return entry;
     const { id, ...copy } = entry;
 
+    const normalizedDate = normalizeEntryDate(copy);
+    if (normalizedDate) {
+        copy.date = normalizedDate;
+    }
+
     if (copy.streams) {
         let streamsObj = copy.streams;
 
@@ -116,16 +153,30 @@ export const prepareJournalEntryForFirestore = (entry) => {
         copy.streams = streamsObj;
     }
 
+    // Strip redundant large per-point arrays from foilAnalysis when streams is already stored,
+    // keeping Firestore documents well below the 1 MiB limit.
+    if (copy.foilAnalysis && typeof copy.foilAnalysis === 'object' && copy.streams) {
+        const { data: _d, dynamicBaseline: _db, pointStates: _ps, ...compactAnalysis } = copy.foilAnalysis;
+        copy.foilAnalysis = compactAnalysis;
+    }
+
     return sanitizeForFirestore(copy);
 };
 
 /**
  * Hydrates a journal entry when loaded from Firestore:
+ * - Normalizes entry.date
  * - Reconstructs streams.latlng in-memory from mapPolyline if missing
+ * - Reconstructs full foilAnalysis (with chart arrays and adaptive profile) from streams
  */
 export const hydrateJournalEntry = (entry) => {
     if (!entry || typeof entry !== 'object') return entry;
     const hydrated = { ...entry };
+
+    const normalizedDate = normalizeEntryDate(hydrated);
+    if (normalizedDate) {
+        hydrated.date = normalizedDate;
+    }
 
     if (hydrated.mapPolyline && hydrated.streams && !hydrated.streams.latlng) {
         try {
@@ -141,6 +192,17 @@ export const hydrateJournalEntry = (entry) => {
         }
     }
 
+    if (hydrated.streams && (!hydrated.foilAnalysis || !hydrated.foilAnalysis.data || !hydrated.foilAnalysis.adaptiveProfile)) {
+        try {
+            const computed = analyzeSession(hydrated.streams);
+            if (computed) {
+                hydrated.foilAnalysis = computed;
+            }
+        } catch (e) {
+            console.warn('[DB] Could not compute foilAnalysis for entry:', hydrated.id, e);
+        }
+    }
+
     return hydrated;
 };
 
@@ -148,8 +210,23 @@ export const hydrateJournalEntry = (entry) => {
 const journalCol = (uid) => collection(db, 'users', uid, 'journal_entries');
 
 export const getJournalEntries = async (uid) => {
-    const snap = await getDocs(query(journalCol(uid), orderBy('date', 'desc')));
-    return snap.docs.map((d) => hydrateJournalEntry({ id: d.id, ...d.data() }));
+    // Fetch all docs in journal_entries without orderBy('date') so Firestore never excludes
+    // documents that might have a missing or unindexed date field; sort client-side instead.
+    const snap = await getDocs(journalCol(uid));
+    const entries = [];
+    for (const d of snap.docs) {
+        try {
+            entries.push(hydrateJournalEntry({ id: d.id, ...d.data() }));
+        } catch (e) {
+            console.warn('[DB] Failed to hydrate journal entry:', d.id, e);
+            entries.push({ id: d.id, ...d.data() });
+        }
+    }
+    return entries.sort((a, b) => {
+        const tA = new Date(a.date || 0).getTime() || 0;
+        const tB = new Date(b.date || 0).getTime() || 0;
+        return tB - tA;
+    });
 };
 
 export const addJournalEntry = async (uid, entry) => {

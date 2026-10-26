@@ -96,8 +96,10 @@ const SessionMap = ({ polyline, summary_polyline, streams, highlightIndex }) => 
         for (let i = MAP_SAMPLE_RATE; i < latlngStream.length; i += MAP_SAMPLE_RATE) {
             const p1 = latlngStream[i - MAP_SAMPLE_RATE];
             const p2 = latlngStream[i];
-            const idx1 = Math.min(i - MAP_SAMPLE_RATE, velocityStream.length - 1);
-            const idx2 = Math.min(i, velocityStream.length - 1);
+            const ratio1 = (i - MAP_SAMPLE_RATE) / Math.max(1, latlngStream.length - 1);
+            const ratio2 = i / Math.max(1, latlngStream.length - 1);
+            const idx1 = Math.min(Math.round(ratio1 * (velocityStream.length - 1)), velocityStream.length - 1);
+            const idx2 = Math.min(Math.round(ratio2 * (velocityStream.length - 1)), velocityStream.length - 1);
             const speedMs = ((velocityStream[idx1] ?? 0) + (velocityStream[idx2] ?? 0)) / 2;
             
             let bucketName;

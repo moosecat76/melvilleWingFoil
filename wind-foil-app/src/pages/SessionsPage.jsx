@@ -14,6 +14,34 @@ const SessionMap = lazy(() => import('../components/SessionMap'));
 const FoilAnalysisChart = lazy(() => import('../components/FoilAnalysisChart'));
 const HeartRateChart = lazy(() => import('../components/HeartRateChart'));
 
+class CardMediaBoundary extends React.Component {
+    constructor(props) {
+        super(props);
+        this.state = { hasError: false };
+    }
+    static getDerivedStateFromError() {
+        return { hasError: true };
+    }
+    componentDidCatch(err) {
+        console.warn('[SessionsPage] Media component render error:', err);
+    }
+    render() {
+        if (this.state.hasError) return null;
+        return this.props.children;
+    }
+}
+
+const safeFormatDate = (dateVal, fmt) => {
+    try {
+        if (!dateVal) return '—';
+        const d = typeof dateVal.toDate === 'function' ? dateVal.toDate() : new Date(dateVal);
+        if (isNaN(d.getTime())) return '—';
+        return format(d, fmt);
+    } catch (_) {
+        return '—';
+    }
+};
+
 
 const SessionsPage = () => {
     const { currentLocation } = useLocation();
@@ -303,12 +331,16 @@ const SessionsPage = () => {
 
     // Get foil stats for a quick summary line
     const getQuickStats = (entry) => {
-        let analysis = entry.foilAnalysis;
-        if (entry.streams && (!analysis || !analysis.adaptiveProfile)) {
-            // Don't recompute on every render — just show basic stats
-            return analyzeSession(entry.streams);
+        try {
+            let analysis = entry.foilAnalysis;
+            if (entry.streams && (!analysis || !analysis.adaptiveProfile || !analysis.data)) {
+                return analyzeSession(entry.streams) || analysis || null;
+            }
+            return analysis || null;
+        } catch (e) {
+            console.warn('[SessionsPage] Failed to compute analysis for entry:', entry?.id, e);
+            return entry?.foilAnalysis || null;
         }
-        return analysis;
     };
 
     return (
@@ -756,10 +788,15 @@ const SessionsPage = () => {
                     entries.map((entry, index) => {
                         const analysis = getQuickStats(entry);
                         const isLatest = index === 0;
+                        const safeRating = Math.min(5, Math.max(0, Math.round(Number(entry.rating) || 0)));
+                        const hasHeartRateData = Boolean(
+                            entry.streams?.heartrate?.data?.some((v) => v > 0) ||
+                            (Array.isArray(entry.streams) && entry.streams.find((s) => s.type === 'heartrate')?.data?.some((v) => v > 0))
+                        );
 
                         return (
                             <div
-                                key={entry.id}
+                                key={entry.id || `${entry.date}-${index}`}
                                 className="glass-panel"
                                 style={{ padding: '16px', cursor: 'pointer', transition: 'border-color 0.2s' }}
                                 onClick={() => navigate(`/session/${entry.id}`)}
@@ -774,13 +811,13 @@ const SessionsPage = () => {
                                         {/* Date & Rating */}
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                                             <span style={{ fontWeight: 600, fontSize: '1rem' }}>
-                                                {format(new Date(entry.date), 'EEE dd MMM')}
+                                                {safeFormatDate(entry.date, 'EEE dd MMM')}
                                             </span>
                                             <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                                                {format(new Date(entry.date), 'h:mm a')}
+                                                {safeFormatDate(entry.date, 'h:mm a')}
                                             </span>
                                             <span style={{ color: '#facc15', fontWeight: 'bold', fontSize: '0.85rem' }}>
-                                                {'★'.repeat(entry.rating)}{'☆'.repeat(5 - entry.rating)}
+                                                {'★'.repeat(safeRating)}{'☆'.repeat(5 - safeRating)}
                                             </span>
                                         </div>
 
@@ -799,8 +836,8 @@ const SessionsPage = () => {
                                         </p>
 
                                         {/* Foil stats summary inline */}
-                                        {analysis && (
-                                            <div style={{ display: 'flex', gap: '12px', marginTop: '6px', fontSize: '0.8rem' }}>
+                                        {analysis && analysis.stats && (
+                                            <div style={{ display: 'flex', gap: '12px', marginTop: '6px', fontSize: '0.8rem', flexWrap: 'wrap' }}>
                                                 {(entry.activityStats?.topSpeed || analysis.stats?.topSpeed) && (
                                                     <span style={{ color: 'var(--accent-primary)' }}><b>{entry.activityStats?.topSpeed || analysis.stats.topSpeed} kts</b> Top Speed</span>
                                                 )}
@@ -857,27 +894,33 @@ const SessionsPage = () => {
                                 {/* Strava Track Map */}
                                 {entry.mapPolyline && (
                                     <div style={{ marginTop: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }} onClick={(e) => e.stopPropagation()}>
-                                        <Suspense fallback={<div style={{ padding: '30px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading map...</div>}>
-                                            <SessionMap summary_polyline={entry.mapPolyline} streams={entry.streams} />
-                                        </Suspense>
+                                        <CardMediaBoundary>
+                                            <Suspense fallback={<div style={{ padding: '30px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading map...</div>}>
+                                                <SessionMap summary_polyline={entry.mapPolyline} streams={entry.streams} />
+                                            </Suspense>
+                                        </CardMediaBoundary>
                                     </div>
                                 )}
 
                                 {/* Most recent session or non-GPS session — show chart */}
                                 {isLatest && analysis && (
                                     <div style={{ marginTop: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }} onClick={(e) => e.stopPropagation()}>
-                                        <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading chart...</div>}>
-                                            <FoilAnalysisChart analysisData={analysis} />
-                                        </Suspense>
+                                        <CardMediaBoundary>
+                                            <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading chart...</div>}>
+                                                <FoilAnalysisChart analysisData={analysis} />
+                                            </Suspense>
+                                        </CardMediaBoundary>
                                     </div>
                                 )}
 
                                 {/* Heart rate chart for latest or non-GPS session */}
-                                {entry.streams && !analysis && (
+                                {(isLatest || !analysis) && hasHeartRateData && (
                                     <div style={{ marginTop: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }} onClick={(e) => e.stopPropagation()}>
-                                        <Suspense fallback={null}>
-                                            <HeartRateChart streams={entry.streams} />
-                                        </Suspense>
+                                        <CardMediaBoundary>
+                                            <Suspense fallback={null}>
+                                                <HeartRateChart streams={entry.streams} />
+                                            </Suspense>
+                                        </CardMediaBoundary>
                                     </div>
                                 )}
                             </div>

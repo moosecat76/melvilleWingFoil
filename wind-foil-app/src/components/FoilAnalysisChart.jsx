@@ -19,10 +19,13 @@ const CustomTooltip = ({ active, payload, hasAltitude }) => {
 };
 
 const FoilAnalysisChart = ({ analysisData, onHover }) => {
-    if (!analysisData) return null;
+    if (!analysisData || !analysisData.data) return null;
 
-    const { data, foilSegments, baselineAltitude, dynamicBaseline, pointStates, mode, adaptiveThreshold } = analysisData;
+    const { data, foilSegments = [], baselineAltitude, dynamicBaseline, pointStates, mode, adaptiveThreshold } = analysisData;
     const { velocity, altitude, time } = data;
+    if (!Array.isArray(time) || !Array.isArray(velocity) || time.length === 0 || velocity.length === 0) {
+        return null;
+    }
 
     // Prepare chart data - downsample to greatly improve JS rendering performance
     // Ensure we preserve peak velocity within each downsampled bucket so short flights/peaks don't vanish visually
