@@ -1,6 +1,7 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { useLocation } from '../context/LocationContext';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { getJournalEntries, addJournalEntry, deleteJournalEntry, updateJournalEntry } from '../services/journalService';
 import { Book, Plus, Trash2, Edit2, Calendar, Wind, Clock, MapPin, X, ChevronRight } from 'lucide-react';
 import { format } from 'date-fns';
@@ -46,6 +47,8 @@ const safeFormatDate = (dateVal, fmt) => {
 const SessionsPage = () => {
     const { currentLocation } = useLocation();
     const { user, loading: authLoading } = useAuth();
+    const { showToast } = useToast();
+    const [confirmDeleteId, setConfirmDeleteId] = useState(null);
     const navigate = useNavigate();
     const [entries, setEntries] = useState([]);
     const [isAdding, setIsAdding] = useState(false);
@@ -185,9 +188,11 @@ const SessionsPage = () => {
                 if (updated) {
                     setEntries(entries.map(e => e.id === editId ? updated : e));
                 }
+                showToast('Session updated successfully!', 'success');
             } else {
                 const added = await addJournalEntry(entryData, user?.uid);
                 setEntries([added, ...entries]);
+                showToast('Session logged successfully!', 'success');
             }
 
             // Reset
@@ -197,7 +202,7 @@ const SessionsPage = () => {
             setEditId(null);
         } catch (err) {
             console.error('Failed to save journal entry:', err);
-            alert('Failed to save entry: ' + err.message + '\n\nSee browser console for details.');
+            showToast('Failed to save entry: ' + err.message, 'error');
         }
     };
 
@@ -223,9 +228,13 @@ const SessionsPage = () => {
     };
 
     const handleDelete = async (id) => {
-        if (window.confirm('Delete this session?')) {
+        try {
             await deleteJournalEntry(id, user?.uid);
             setEntries(entries.filter(e => e.id !== id));
+            setConfirmDeleteId(null);
+            showToast('Session deleted', 'info');
+        } catch (err) {
+            showToast('Failed to delete session: ' + err.message, 'error');
         }
     };
 
@@ -263,7 +272,7 @@ const SessionsPage = () => {
             }));
         } catch (e) {
             console.error('[TCX] Parse error:', e);
-            alert('Failed to parse GPS file: ' + e.message);
+            showToast('Failed to parse GPS file: ' + e.message, 'error');
             setTcxFileName(null);
         } finally {
             setIsTcxParsing(false);
@@ -279,7 +288,7 @@ const SessionsPage = () => {
             setGfitSessions(sessions);
         } catch (e) {
             console.error('[GHealth] fetchRecentSessions error:', e);
-            alert('Could not load Google Health sessions: ' + e.message);
+            showToast('Could not load Google Health sessions: ' + e.message, 'error');
             setGfitSessions([]);
         } finally {
             setGfitLoading(false);
@@ -323,7 +332,7 @@ const SessionsPage = () => {
             }));
         } catch (e) {
             console.error('[GFit] fetchSessionTelemetry error:', e);
-            alert('Failed to load session data: ' + e.message);
+            showToast('Failed to load session data: ' + e.message, 'error');
         } finally {
             setGfitLoadingId(null);
         }
@@ -884,13 +893,33 @@ const SessionsPage = () => {
                                             >
                                                 <Edit2 size={14} />
                                             </button>
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); handleDelete(entry.id); }}
-                                                style={{ background: 'none', border: 'none', color: '#ff6b6b', cursor: 'pointer', padding: '4px' }}
-                                                title="Delete"
-                                            >
-                                                <Trash2 size={14} />
-                                            </button>
+                                            {confirmDeleteId === entry.id ? (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(248, 113, 113, 0.15)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(248, 113, 113, 0.3)' }} onClick={(e) => e.stopPropagation()}>
+                                                    <span style={{ fontSize: '0.72rem', color: '#f87171', fontWeight: 600 }}>Delete?</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => { e.stopPropagation(); handleDelete(entry.id); }}
+                                                        style={{ background: '#f87171', border: 'none', color: '#0f172a', borderRadius: '3px', padding: '2px 6px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}
+                                                    >
+                                                        Yes
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
+                                                        style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '2px 4px', fontSize: '0.72rem' }}
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(entry.id); }}
+                                                    style={{ background: 'none', border: 'none', color: '#ff6b6b', cursor: 'pointer', padding: '4px' }}
+                                                    title="Delete"
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
                                 </div>

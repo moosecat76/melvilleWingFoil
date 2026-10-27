@@ -166,10 +166,10 @@ const LocationManager = () => {
                                 justifyContent: 'space-between',
                                 alignItems: 'center',
                                 padding: '8px',
-                                background: isCurrent ? 'var(--primary-color)' : 'rgba(255,255,255,0.05)',
+                                background: isCurrent ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255,255,255,0.05)',
                                 borderRadius: '6px',
                                 cursor: 'pointer',
-                                border: isCurrent ? '1px solid var(--accent-primary)' : 'none'
+                                border: isCurrent ? '1px solid var(--accent-primary)' : '1px solid transparent'
                             }}
                             onClick={() => switchLocation(loc.id)}
                         >

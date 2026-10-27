@@ -1,24 +1,34 @@
 import React from 'react';
 import { ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea, ReferenceLine } from 'recharts';
+import { usePreferences } from '../context/PreferencesContext';
 
-const CustomTooltip = ({ active, payload, hasAltitude }) => {
+const CustomTooltip = ({ active, payload, hasAltitude, speedUnit, speedMult }) => {
     if (active && payload && payload.length) {
         const data = payload[0].payload;
+        const displaySpeed = (data.speed * speedMult).toFixed(1);
         return (
             <div style={{ backgroundColor: '#1e293b', padding: '10px', border: '1px solid #334155', color: '#f8fafc', borderRadius: '4px', fontSize: '12px' }}>
                 <p style={{ margin: '0 0 5px 0', color: '#94a3b8' }}>{Math.floor(data.time / 60)}m {Math.round(data.time % 60)}s</p>
-                <p style={{ margin: '0 0 2px 0' }}>Speed: <strong style={{color: '#8884d8'}}>{data.speed.toFixed(2)} m/s ({(data.speed * 1.94384).toFixed(1)} kts)</strong></p>
+                <p style={{ margin: '0 0 2px 0' }}>
+                    Speed: <strong style={{ color: '#8884d8' }}>{displaySpeed} {speedUnit}</strong>{' '}
+                    <span style={{ fontSize: '10px', color: '#94a3b8' }}>({data.speed.toFixed(1)} m/s)</span>
+                </p>
                 {hasAltitude && (
-                    <p style={{ margin: '0 0 2px 0' }}>Altitude: <strong style={{color: '#82ca9d'}}>{data.altitude.toFixed(2)} m</strong></p>
+                    <p style={{ margin: '0 0 2px 0' }}>Altitude: <strong style={{ color: '#82ca9d' }}>{data.altitude.toFixed(2)} m</strong></p>
                 )}
-                <p style={{ margin: 0 }}>State: <strong style={{color: data.state === 'beach' ? '#f87171' : data.state === 'foiling' ? '#4ade80' : '#fbbf24'}}>{data.state.charAt(0).toUpperCase() + data.state.slice(1)}</strong></p>
+                <p style={{ margin: 0 }}>State: <strong style={{ color: data.state === 'beach' ? '#f87171' : data.state === 'foiling' ? '#4ade80' : '#fbbf24' }}>{data.state.charAt(0).toUpperCase() + data.state.slice(1)}</strong></p>
             </div>
         );
     }
     return null;
 };
 
-const FoilAnalysisChart = ({ analysisData, onHover }) => {
+const FoilAnalysisChart = ({ analysisData, onHover, unit: propUnit }) => {
+    const preferences = usePreferences();
+    const activeUnit = propUnit || preferences.unit || 'knots';
+    const speedMult = activeUnit === 'kmh' ? 3.6 : 1.94384;
+    const speedUnit = activeUnit === 'kmh' ? 'km/h' : 'kts';
+
     if (!analysisData || !analysisData.data) return null;
 
     const { data, foilSegments = [], baselineAltitude, dynamicBaseline, pointStates, mode, adaptiveThreshold } = analysisData;
@@ -31,7 +41,7 @@ const FoilAnalysisChart = ({ analysisData, onHover }) => {
     // Ensure we preserve peak velocity within each downsampled bucket so short flights/peaks don't vanish visually
     const targetPoints = 500;
     const samplingRate = Math.max(1, Math.ceil(time.length / targetPoints));
-    
+
     const chartData = [];
     for (let i = 0; i < time.length; i += samplingRate) {
         let bestIdx = i;
@@ -48,6 +58,7 @@ const FoilAnalysisChart = ({ analysisData, onHover }) => {
             time: time[bestIdx],
             timeMin: (time[bestIdx] / 60).toFixed(2), // formatted for X-Axis
             speed: velocity[bestIdx],
+            displaySpeed: Number((velocity[bestIdx] * speedMult).toFixed(1)),
             altitude: altitude ? altitude[bestIdx] : 0,
             baseline: dynamicBaseline ? dynamicBaseline[bestIdx] : baselineAltitude,
             state: pointStates ? pointStates[bestIdx] : 'sailing'
@@ -60,6 +71,7 @@ const FoilAnalysisChart = ({ analysisData, onHover }) => {
     const hasAltitude = mode ? mode === 'altitude' : (maxAlt - minAlt) > 0.1;
     const altPadding = hasAltitude ? (maxAlt - minAlt) * 0.1 : 1;
     const foilLineY = adaptiveThreshold || 1.95;
+    const foilLineConverted = Number((foilLineY * speedMult).toFixed(1));
 
     return (
         <div style={{ width: '100%', height: 400, background: 'rgba(0,0,0,0.2)', borderRadius: '8px', padding: '10px' }}>
@@ -67,12 +79,12 @@ const FoilAnalysisChart = ({ analysisData, onHover }) => {
                 <h4 style={{ margin: 0, color: 'var(--text-secondary)' }}>Flight Analysis</h4>
                 {!hasAltitude && (
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: '10px' }}>
-                        Adaptive foil threshold: ~{foilLineY.toFixed(1)} m/s ({(foilLineY * 1.94384).toFixed(1)} kts)
+                        Adaptive foil threshold: ~{foilLineConverted} {speedUnit} ({foilLineY.toFixed(1)} m/s)
                     </span>
                 )}
             </div>
             <ResponsiveContainer width="100%" height="90%">
-                <ComposedChart 
+                <ComposedChart
                     data={chartData}
                     onMouseMove={(e) => {
                         if (e && e.activeTooltipIndex !== undefined && chartData[e.activeTooltipIndex] && onHover) {
@@ -95,11 +107,11 @@ const FoilAnalysisChart = ({ analysisData, onHover }) => {
                         fontSize={12}
                     />
 
-                    {/* Primary Y-Axis: Speed (m/s) */}
+                    {/* Primary Y-Axis: Speed in user unit */}
                     <YAxis
                         yAxisId="speed"
                         orientation="left"
-                        label={{ value: 'Speed (m/s)', angle: -90, position: 'insideLeft', fill: '#8884d8' }}
+                        label={{ value: `Speed (${speedUnit})`, angle: -90, position: 'insideLeft', fill: '#8884d8' }}
                         stroke="#8884d8"
                         fontSize={12}
                     />
@@ -117,7 +129,7 @@ const FoilAnalysisChart = ({ analysisData, onHover }) => {
                         />
                     )}
 
-                    <Tooltip content={<CustomTooltip hasAltitude={hasAltitude} />} />
+                    <Tooltip content={<CustomTooltip hasAltitude={hasAltitude} speedUnit={speedUnit} speedMult={speedMult} />} />
 
                     {/* Dynamic Baseline replacing static ReferenceLine */}
                     {hasAltitude && (
@@ -126,7 +138,7 @@ const FoilAnalysisChart = ({ analysisData, onHover }) => {
 
                     {/* Adaptive speed threshold reference line when in speed-only mode */}
                     {!hasAltitude && (
-                        <ReferenceLine yAxisId="speed" y={foilLineY} stroke="#4ade80" strokeDasharray="4 4" strokeOpacity={0.6} />
+                        <ReferenceLine yAxisId="speed" y={foilLineConverted} stroke="#4ade80" strokeDasharray="4 4" strokeOpacity={0.6} />
                     )}
 
                     {/* Foil Segments Background Overlay */}
@@ -145,7 +157,7 @@ const FoilAnalysisChart = ({ analysisData, onHover }) => {
                     <Line
                         yAxisId="speed"
                         type="monotone"
-                        dataKey="speed"
+                        dataKey="displaySpeed"
                         stroke="#8884d8"
                         dot={false}
                         strokeWidth={2}

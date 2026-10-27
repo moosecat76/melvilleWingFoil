@@ -1,9 +1,9 @@
-
 import React, { useEffect } from 'react';
 import { MapContainer, TileLayer, Polyline, Marker, Popup, CircleMarker } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { decodePolyline } from '../services/tcxService';
+import { usePreferences } from '../context/PreferencesContext';
 
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
@@ -16,7 +16,12 @@ let DefaultIcon = L.icon({
 });
 L.Marker.prototype.options.icon = DefaultIcon;
 
-const SessionMap = ({ polyline, summary_polyline, streams, highlightIndex }) => {
+const SessionMap = ({ polyline, summary_polyline, streams, highlightIndex, unit: propUnit }) => {
+    const preferences = usePreferences();
+    const activeUnit = propUnit || preferences.unit || 'knots';
+    const speedMult = activeUnit === 'kmh' ? 3.6 : 1.94384;
+    const speedUnit = activeUnit === 'kmh' ? 'km/h' : 'kts';
+
     const encoded = polyline || summary_polyline;
 
     // Helper to render simple map (for fallback or no streams)
@@ -74,8 +79,7 @@ const SessionMap = ({ polyline, summary_polyline, streams, highlightIndex }) => 
             return renderSimpleMap();
         }
 
-        // Buckets based on user request (<0.2: stopped, 0.2-0.8: crawl, 0.8-1: planing, 1-2: foil, 2+: cranking)
-        // Using m/s for thresholds as requested
+        // Buckets based on speed thresholds (using m/s for thresholds)
         const buckets = {
             stopped: [],  // < 0.2 m/s
             crawl: [],    // 0.2-0.8 m/s
@@ -85,13 +89,10 @@ const SessionMap = ({ polyline, summary_polyline, streams, highlightIndex }) => 
         };
 
         // Maintain continuous lines for each bucket to massively reduce DOM node generation.
-        // Instead of thousands of tiny 2-point polylines, we generate one polyline per continuous speed block.
         let currentBucket = null;
         let currentPath = [];
 
-        // Downsample slightly for the map if it's huge, but continuous lines handle it nicely.
-        // We will sample every 2nd point to half the array size, reducing path length.
-        const MAP_SAMPLE_RATE = Math.max(1, Math.ceil(latlngStream.length / 1500)); 
+        const MAP_SAMPLE_RATE = Math.max(1, Math.ceil(latlngStream.length / 1500));
 
         for (let i = MAP_SAMPLE_RATE; i < latlngStream.length; i += MAP_SAMPLE_RATE) {
             const p1 = latlngStream[i - MAP_SAMPLE_RATE];
@@ -101,7 +102,7 @@ const SessionMap = ({ polyline, summary_polyline, streams, highlightIndex }) => 
             const idx1 = Math.min(Math.round(ratio1 * (velocityStream.length - 1)), velocityStream.length - 1);
             const idx2 = Math.min(Math.round(ratio2 * (velocityStream.length - 1)), velocityStream.length - 1);
             const speedMs = ((velocityStream[idx1] ?? 0) + (velocityStream[idx2] ?? 0)) / 2;
-            
+
             let bucketName;
             if (speedMs < 0.2) bucketName = 'stopped';
             else if (speedMs < 0.8) bucketName = 'crawl';
@@ -110,20 +111,16 @@ const SessionMap = ({ polyline, summary_polyline, streams, highlightIndex }) => 
             else bucketName = 'cranking';
 
             if (bucketName !== currentBucket) {
-                // Save the old path if it exists
                 if (currentBucket && currentPath.length > 0) {
                     buckets[currentBucket].push([...currentPath]);
                 }
-                // Start a new path (overlapping the previous point slightly for continuity)
                 currentBucket = bucketName;
                 currentPath = [p1, p2];
             } else {
-                // Continue the line
                 currentPath.push(p2);
             }
         }
-        
-        // Push final path
+
         if (currentBucket && currentPath.length > 0) {
             buckets[currentBucket].push([...currentPath]);
         }
@@ -154,22 +151,24 @@ const SessionMap = ({ polyline, summary_polyline, streams, highlightIndex }) => 
                     <Marker position={end}><Popup>End</Popup></Marker>
 
                     {highlightPoint && (
-                        <CircleMarker 
-                            center={highlightPoint} 
-                            radius={6} 
-                            pathOptions={{ color: '#ffffff', fillColor: '#38bdf8', fillOpacity: 1, weight: 2 }} 
+                        <CircleMarker
+                            center={highlightPoint}
+                            radius={6}
+                            pathOptions={{ color: '#ffffff', fillColor: '#38bdf8', fillOpacity: 1, weight: 2 }}
                         />
                     )}
 
                     {/* Legend Overlay */}
                     <div className="leaflet-bottom leaflet-right" style={{ pointerEvents: 'none', margin: '10px', marginBottom: '20px' }}>
                         <div className="leaflet-control" style={{ background: 'rgba(15, 23, 42, 0.9)', padding: '10px', borderRadius: '8px', color: '#f8fafc', fontSize: '0.75rem', pointerEvents: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', border: '1px solid rgba(148, 163, 184, 0.2)', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.3)' }}>
-                            <div style={{ fontWeight: 'bold', marginBottom: '2px', borderBottom: '1px solid rgba(148, 163, 184, 0.2)', paddingBottom: '2px', color: '#38bdf8' }}>Speed (m/s)</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#94a3b8', borderRadius: '2px' }}></span> &lt; 0.2 (Stopped)</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#f87171', borderRadius: '2px' }}></span> 0.2 - 0.8 (Crawl)</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#fbbf24', borderRadius: '2px' }}></span> 0.8 - 1 (Planing)</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#4ade80', borderRadius: '2px' }}></span> 1 - 2 (Foil)</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#818cf8', borderRadius: '2px' }}></span> 2+ (Cranking)</div>
+                            <div style={{ fontWeight: 'bold', marginBottom: '2px', borderBottom: '1px solid rgba(148, 163, 184, 0.2)', paddingBottom: '2px', color: '#38bdf8' }}>
+                                Speed ({speedUnit})
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#94a3b8', borderRadius: '2px' }}></span> &lt; {(0.2 * speedMult).toFixed(1)} (Stopped)</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#f87171', borderRadius: '2px' }}></span> {(0.2 * speedMult).toFixed(1)} – {(0.8 * speedMult).toFixed(1)} (Crawl)</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#fbbf24', borderRadius: '2px' }}></span> {(0.8 * speedMult).toFixed(1)} – {(1.0 * speedMult).toFixed(1)} (Planing)</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#4ade80', borderRadius: '2px' }}></span> {(1.0 * speedMult).toFixed(1)} – {(2.0 * speedMult).toFixed(1)} (Foil)</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ display: 'block', width: '12px', height: '12px', background: '#818cf8', borderRadius: '2px' }}></span> {(2.0 * speedMult).toFixed(1)}+ (Cranking)</div>
                         </div>
                     </div>
                 </MapContainer>

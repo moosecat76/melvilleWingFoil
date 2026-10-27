@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { format } from 'date-fns';
 import { Wind, Navigation, ThumbsUp, ThumbsDown, ArrowUp, AlertTriangle, Anchor, Waves, LogIn, LogOut, User } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, ComposedChart, ReferenceLine, ReferenceArea, Label } from 'recharts';
@@ -6,6 +6,8 @@ import { getWeatherForecast, getTideForecast, getActualWeather, processChartData
 import { getWindRating, getGearRecommendation } from '../services/recommendationService';
 import { useLocation } from '../context/LocationContext';
 import { useAuth } from '../context/AuthContext';
+import { usePreferences } from '../context/PreferencesContext';
+import { useToast } from '../context/ToastContext';
 
 import MapComponent from '../components/MapComponent';
 import GearSelector from '../components/GearSelector';
@@ -42,6 +44,9 @@ const CustomArrowDot = (props) => {
 const ForecastPage = () => {
     const { currentLocation } = useLocation();
     const { user, login, logout, loading: authLoading } = useAuth();
+    const { unit, setUnit, unitLabel, formatSpeedFromKmh } = usePreferences();
+    const { showToast } = useToast();
+
     const [googleFitUser, setGoogleFitUser] = useState(null);
     const [gfitAuthLoading, setGfitAuthLoading] = useState(false);
 
@@ -74,12 +79,13 @@ const ForecastPage = () => {
         } else {
             localStorage.setItem('melvill_user_gear', JSON.stringify(items));
         }
+        showToast('Quiver saved successfully', 'success');
     };
 
     const [showGearSelector, setShowGearSelector] = useState(false);
-    const [unit, setUnit] = useState('knots');
 
     useEffect(() => {
+        let isMounted = true;
         const fetchData = async () => {
             try {
                 setLoading(true);
@@ -88,6 +94,8 @@ const ForecastPage = () => {
                 const rawData = await getWeatherForecast(currentLocation.latitude, currentLocation.longitude);
                 const tideData = await getTideForecast(currentLocation.latitude, currentLocation.longitude);
                 const actualWeather = await getActualWeather(currentLocation.latitude, currentLocation.longitude);
+
+                if (!isMounted) return;
 
                 const processed = processChartData(rawData, tideData);
                 setData(processed);
@@ -111,13 +119,17 @@ const ForecastPage = () => {
                 }
             } catch (err) {
                 console.error(err);
-                setError('Failed to load weather data.');
+                if (isMounted) {
+                    setError('Failed to load weather data.');
+                    showToast('Failed to load weather data', 'error');
+                }
             } finally {
-                setLoading(false);
+                if (isMounted) setLoading(false);
             }
         };
 
         fetchData();
+        return () => { isMounted = false; };
     }, [currentLocation]);
 
     // ── Check Google Health connection on mount ──
@@ -130,7 +142,7 @@ const ForecastPage = () => {
     useEffect(() => {
         if (authLoading) return;
         const params = new URLSearchParams(window.location.search);
-        const code  = params.get('code');
+        const code = params.get('code');
         const state = params.get('state');
         if (code && state === 'googlefit') {
             window.history.replaceState({}, document.title, window.location.pathname);
@@ -138,15 +150,62 @@ const ForecastPage = () => {
             handleGoogleFitCallback(code, user?.uid)
                 .then((profile) => {
                     setGoogleFitUser(profile);
-                    alert(`Google Health connected as ${profile.email || 'your account'}!`);
+                    showToast(`Google Health connected as ${profile.email || 'your account'}!`, 'success');
                 })
                 .catch((e) => {
                     console.error('[ForecastPage] Google Health callback error:', e);
-                    alert('Google Health connection failed: ' + e.message);
+                    showToast('Google Health connection failed: ' + e.message, 'error');
                 })
                 .finally(() => setGfitAuthLoading(false));
         }
-    }, [user?.uid, authLoading]);
+    }, [user?.uid, authLoading, showToast]);
+
+    // ── Memoized chart data & nighttime shading (ALL HOOKS CALLED AT TOP) ──
+    const oneDayAgo = useMemo(() => {
+        const d = new Date();
+        d.setDate(d.getDate() - 1);
+        d.setHours(0, 0, 0, 0);
+        return d;
+    }, []);
+
+    const chartData = useMemo(() => {
+        if (!data || data.length === 0) return [];
+        return data
+            .filter(d => d.rawDate >= oneDayAgo)
+            .map(d => {
+                const s = (unit === 'knots' ? (d.speed || 0) * 0.539957 : (d.speed || 0));
+                const g = (unit === 'knots' ? (d.gusts || 0) * 0.539957 : (d.gusts || 0));
+                return {
+                    ...d,
+                    chartSpeed: Number(s.toFixed(1)),
+                    chartGusts: Number(g.toFixed(1))
+                };
+            });
+    }, [data, unit, oneDayAgo]);
+
+    const nightBands = useMemo(() => {
+        const bands = [];
+        if (!daily || !Array.isArray(daily.time) || !Array.isArray(daily.sunrise) || !Array.isArray(daily.sunset)) {
+            return bands;
+        }
+
+        for (let i = 0; i < daily.time.length; i++) {
+            const sunsetTime = new Date(daily.sunset[i]).getTime();
+            if (i < daily.time.length - 1 && daily.sunrise[i + 1]) {
+                const nextSunriseTime = new Date(daily.sunrise[i + 1]).getTime();
+                bands.push({ start: sunsetTime, end: nextSunriseTime });
+            }
+        }
+
+        if (daily.sunrise[0] && chartData.length > 0) {
+            const firstSunrise = new Date(daily.sunrise[0]).getTime();
+            if (chartData[0].time < firstSunrise) {
+                bands.unshift({ start: chartData[0].time, end: firstSunrise });
+            }
+        }
+
+        return bands;
+    }, [daily, chartData]);
 
     const handleImport = async (e) => {
         const file = e.target.files[0];
@@ -154,57 +213,39 @@ const ForecastPage = () => {
         try {
             setLoading(true);
             const result = await importData(file);
-            console.log('--- DB IMPORT DIAGNOSTIC ---');
-            console.log('Result Data Keys:', result.data ? Object.keys(result.data) : 'none');
-            console.log('User UID:', user?.uid);
 
             if (user?.uid && result.data) {
-                console.log('Starting Cloud Restore...');
                 const { restoreBackupToFirestore } = await import('../services/dbService');
                 await restoreBackupToFirestore(user.uid, result.data);
-                console.log('Cloud Restore Finished');
-            } else {
-                console.log('Skipping Cloud Restore, user not logged in or missing data');
             }
-            alert(`Successfully restored! Reloading...`);
-            window.location.reload();
+            showToast('Successfully restored data! Refreshing…', 'success');
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
         } catch (err) {
             setLoading(false);
-            alert('Failed to import data: ' + err.message);
+            showToast('Failed to import data: ' + err.message, 'error');
         }
     };
 
-    const formatSpeed = (val) => {
-        if (val == null) return '-';
-        if (unit === 'knots') return (val * 0.539957).toFixed(1);
-        return Math.round(val);
+    const handleExport = () => {
+        try {
+            exportData(user?.uid);
+            showToast('Data exported successfully', 'success');
+        } catch (err) {
+            showToast('Failed to export data: ' + err.message, 'error');
+        }
     };
 
+    // ── Conditional renders after all hooks are executed ──
     if (loading) return <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>Loading Forecast for {currentLocation.name}...</div>;
     if (error) return <div className="app-container">Error: {error}</div>;
 
     const currentRating = current ? getWindRating(current.speed, current.direction, currentLocation.idealWindDirection) : { label: '-', color: 'grey', rating: 0 };
     const gear = getGearRecommendation(current?.speed, userGear);
 
-    const displayedSpeed = formatSpeed(current?.speed);
-    const displayedGusts = formatSpeed(current?.gusts);
-    const unitLabel = unit === 'knots' ? 'kts' : 'km/h';
-
-    const oneDayAgo = new Date();
-    oneDayAgo.setDate(oneDayAgo.getDate() - 1);
-    oneDayAgo.setHours(0, 0, 0, 0); // start of yesterday
-
-    const chartData = data
-        .filter(d => d.rawDate >= oneDayAgo)
-        .map(d => {
-            const s = (unit === 'knots' ? (d.speed || 0) * 0.539957 : (d.speed || 0));
-            const g = (unit === 'knots' ? (d.gusts || 0) * 0.539957 : (d.gusts || 0));
-            return {
-                ...d,
-                chartSpeed: Number(s.toFixed(1)),
-                chartGusts: Number(g.toFixed(1))
-            };
-        });
+    const displayedSpeed = formatSpeedFromKmh(current?.speed);
+    const displayedGusts = formatSpeedFromKmh(current?.gusts);
 
     const getRatingIcon = (ratingVal) => {
         if (ratingVal <= 1) return <ThumbsDown />;
@@ -253,12 +294,14 @@ const ForecastPage = () => {
                         userGear={userGear}
                         idealWindDirection={currentLocation.idealWindDirection}
                         daily={daily}
+                        unit={unit}
                     />
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem' }}>
-                    {/* Current Conditions */}
-                    <div className="glass-panel" style={{ padding: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                {/* Status, Wind & Tide Cards Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
+                    {/* Current Conditions Card */}
+                    <div className="glass-panel" style={{ padding: '1.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
                             <h2 className="card-title">Current Wind</h2>
                             <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
@@ -269,7 +312,7 @@ const ForecastPage = () => {
                                 )}
                             </div>
                             <div style={{ marginTop: '0.25rem', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                                Gusts: <span style={{ color: 'var(--text-primary)' }}>{displayedGusts}</span> {unitLabel}
+                                Gusts: <span style={{ color: '#fbbf24', fontWeight: 600 }}>{displayedGusts}</span> {unitLabel}
                             </div>
                         </div>
                         <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'end', gap: '0.5rem' }}>
@@ -287,30 +330,32 @@ const ForecastPage = () => {
                         </div>
                     </div>
 
-                    {/* Status & Gear */}
-                    <div className="glass-panel" style={{ padding: '2rem' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
-                            <div>
-                                <h3 className="card-title">Forecast Status</h3>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem' }}>
-                                    <div style={{ color: currentRating.color }}>{React.cloneElement(getRatingIcon(currentRating.rating), { size: 32 })}</div>
-                                    <span style={{ fontSize: '1.5rem', fontWeight: 700, color: currentRating.color }}>{currentRating.label}</span>
+                    {/* Status & Gear Card */}
+                    <div className="glass-panel" style={{ padding: '1.75rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                        <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                                <div>
+                                    <h3 className="card-title">Forecast Status</h3>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem' }}>
+                                        <div style={{ color: currentRating.color }}>{React.cloneElement(getRatingIcon(currentRating.rating), { size: 30 })}</div>
+                                        <span style={{ fontSize: '1.4rem', fontWeight: 700, color: currentRating.color }}>{currentRating.label}</span>
+                                    </div>
                                 </div>
                             </div>
+
+                            {current?.speed > 35 && (
+                                <div className="alert-banner">
+                                    <AlertTriangle size={18} />
+                                    <span>High wind warning! Check conditions.</span>
+                                </div>
+                            )}
                         </div>
 
-                        {current?.speed > 35 && (
-                            <div className="alert-banner">
-                                <AlertTriangle size={18} />
-                                <span>High wind warning! Check conditions.</span>
-                            </div>
-                        )}
-
-                        <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                        <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '1rem', alignItems: 'center' }}>
                             <Anchor size={24} color="var(--accent-primary)" />
                             <div style={{ flex: 1 }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Recommended Gear</div>
+                                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Recommended Gear</div>
                                     <button
                                         onClick={() => setShowGearSelector(!showGearSelector)}
                                         style={{ fontSize: '0.75rem', color: 'var(--accent-primary)', background: 'none', border: '1px solid var(--accent-primary)', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer' }}
@@ -319,7 +364,7 @@ const ForecastPage = () => {
                                     </button>
                                 </div>
                                 {showGearSelector ? (
-                                    <div style={{ marginTop: '1rem' }}>
+                                    <div style={{ marginTop: '0.75rem' }}>
                                         <GearSelector
                                             currentGear={userGear}
                                             onSave={handleSaveGear}
@@ -328,38 +373,64 @@ const ForecastPage = () => {
                                     </div>
                                 ) : (
                                     <>
-                                        <div style={{ fontWeight: 600, fontSize: '1.1rem', color: 'var(--text-primary)', marginTop: '0.25rem' }}>{gear.text}</div>
-                                        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{gear.sub || '(Add gear to personalize)'}</div>
+                                        <div style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text-primary)', marginTop: '0.25rem' }}>{gear.text}</div>
+                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{gear.sub || '(Add gear to personalize)'}</div>
                                     </>
                                 )}
                             </div>
                         </div>
+                    </div>
 
-                        {/* Tides Card */}
-                        <div className="glass-panel" style={{ padding: '2rem' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                    {/* Un-nested Tide Info Card */}
+                    <div className="glass-panel" style={{ padding: '1.75rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                        <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
                                 <Waves size={24} color="var(--accent-primary)" />
                                 <h3 className="card-title" style={{ margin: 0 }}>Tide Info</h3>
                             </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'end' }}>
-                                <div>
-                                    <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Current Level</div>
-                                    <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                                        {current?.tide ? `${current.tide.toFixed(2)} m` : '-'}
-                                    </div>
-                                </div>
-                                {current?.tide < 0.6 && (
-                                    <span style={{ color: 'var(--status-warning)', fontWeight: 600, fontSize: '0.9rem' }}>Low Tide Alert!</span>
-                                )}
+                            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Current Level</div>
+                            <div style={{ fontSize: '2rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                                {current?.tide ? `${current.tide.toFixed(2)} m` : '-'}
                             </div>
                         </div>
+
+                        {current?.tide != null && current.tide < 0.6 ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--status-warning)', fontWeight: 600, fontSize: '0.85rem', marginTop: '1rem', background: 'rgba(251, 191, 36, 0.1)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(251, 191, 36, 0.3)' }}>
+                                <AlertTriangle size={16} />
+                                <span>Low Tide Alert (&lt; 0.6m)</span>
+                            </div>
+                        ) : (
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '1rem' }}>
+                                Tide levels from Open-Meteo Marine model
+                            </div>
+                        )}
                     </div>
                 </div>
 
-                {/* Main Chart */}
-                <div className="glass-panel" style={{ padding: '2rem', height: '400px' }}>
-                    <h3 className="card-title">7-Day Forecast (Arrows show direction)</h3>
-                    <ResponsiveContainer width="100%" height="100%">
+                {/* Main 7-Day Chart with Gust Band & Nighttime Shading */}
+                <div className="glass-panel" style={{ padding: '2rem', height: '420px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '1rem' }}>
+                        <h3 className="card-title" style={{ margin: 0 }}>7-Day Forecast</h3>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ width: '12px', height: '2px', background: 'var(--accent-primary)', display: 'inline-block' }} />
+                                Wind Speed
+                            </span>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ width: '12px', height: '2px', borderTop: '2px dashed #fbbf24', display: 'inline-block' }} />
+                                Gusts
+                            </span>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ width: '10px', height: '10px', background: 'rgba(0,0,0,0.4)', borderRadius: '2px', display: 'inline-block', border: '1px solid rgba(255,255,255,0.1)' }} />
+                                Night
+                            </span>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ width: '12px', height: '2px', borderTop: '2px dashed #60a5fa', display: 'inline-block' }} />
+                                Tide (m)
+                            </span>
+                        </div>
+                    </div>
+                    <ResponsiveContainer width="100%" height="90%">
                         <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                             <defs>
                                 <linearGradient id="colorSpeed" x1="0" y1="0" x2="0" y2="1">
@@ -414,9 +485,14 @@ const ForecastPage = () => {
                                                 <p style={{ color: 'var(--text-primary)', margin: 0 }}>
                                                     Speed: <strong>{data.chartSpeed}</strong> {unitLabel}
                                                 </p>
-                                                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', margin: 0 }}>
-                                                    Gusts: {data.chartGusts} {unitLabel}
+                                                <p style={{ color: '#fbbf24', fontSize: '0.9rem', margin: 0 }}>
+                                                    Gusts: <strong>{data.chartGusts}</strong> {unitLabel}
                                                 </p>
+                                                {data.tide != null && (
+                                                    <p style={{ color: '#60a5fa', fontSize: '0.85rem', margin: 0 }}>
+                                                        Tide: <strong>{data.tide.toFixed(2)} m</strong>
+                                                    </p>
+                                                )}
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '5px', color: 'var(--text-secondary)' }}>
                                                     Direction: {data.direction}°
                                                     <ArrowUp size={14} style={{ transform: `rotate(${data.direction + 180}deg)` }} />
@@ -427,6 +503,18 @@ const ForecastPage = () => {
                                     return null;
                                 }}
                             />
+
+                            {/* Nighttime Shading Bands */}
+                            {nightBands.map((band, idx) => (
+                                <ReferenceArea
+                                    key={`night-${idx}`}
+                                    x1={band.start}
+                                    x2={band.end}
+                                    yAxisId="wind"
+                                    fill="#000000"
+                                    fillOpacity={0.28}
+                                />
+                            ))}
 
                             {/* Day Separators & Labels */}
                             {chartData.map((d) => {
@@ -475,7 +563,22 @@ const ForecastPage = () => {
                                 ) : null;
                             })()}
 
+                            {/* Gust Line (Feature #13) */}
+                            <Line
+                                yAxisId="wind"
+                                type="monotone"
+                                dataKey="chartGusts"
+                                name="Gusts"
+                                stroke="#fbbf24"
+                                strokeWidth={1.5}
+                                strokeDasharray="3 3"
+                                dot={false}
+                                opacity={0.65}
+                            />
+
+                            {/* Main Speed Area */}
                             <Area
+                                yAxisId="wind"
                                 type="monotone"
                                 dataKey="chartSpeed"
                                 name="speed"
@@ -485,6 +588,8 @@ const ForecastPage = () => {
                                 strokeWidth={2}
                                 dot={<CustomArrowDot getWindRating={getWindRating} idealWindDirection={currentLocation.idealWindDirection} />}
                             />
+
+                            {/* Tide Height Line */}
                             <Line
                                 yAxisId="tide"
                                 type="monotone"
@@ -501,9 +606,16 @@ const ForecastPage = () => {
                     </ResponsiveContainer>
                 </div>
 
+                {/* Launch Location Map with Live Wind & Ideal Sector Cone */}
                 <div className="glass-panel" style={{ padding: '2rem' }}>
                     <h3 className="card-title">Launch Location</h3>
-                    <MapComponent lat={currentLocation.latitude} lng={currentLocation.longitude} name={currentLocation.name} />
+                    <MapComponent
+                        lat={currentLocation.latitude}
+                        lng={currentLocation.longitude}
+                        name={currentLocation.name}
+                        windDirection={current?.direction}
+                        idealWindDirection={currentLocation.idealWindDirection}
+                    />
                 </div>
 
                 {/* Data Management Section */}
@@ -512,7 +624,7 @@ const ForecastPage = () => {
                         <Database size={20} /> Data & Settings
                     </h3>
                     <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '1rem' }}>
-                        <button onClick={() => exportData(user?.uid)} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <button onClick={handleExport} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <Download size={16} /> Export Data
                         </button>
                         <div style={{ position: 'relative' }}>
@@ -554,7 +666,11 @@ const ForecastPage = () => {
                                     Reconnect
                                 </button>
                                 <button
-                                    onClick={async () => { await disconnectGoogleFit(user?.uid); setGoogleFitUser(null); }}
+                                    onClick={async () => {
+                                        await disconnectGoogleFit(user?.uid);
+                                        setGoogleFitUser(null);
+                                        showToast('Google Health disconnected', 'info');
+                                    }}
                                     style={{ background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}
                                 >
                                     Disconnect

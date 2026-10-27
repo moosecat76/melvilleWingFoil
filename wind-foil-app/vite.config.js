@@ -7,6 +7,13 @@ export default defineConfig({
   server: {
     host: true, // Listen on all local IP addresses
     allowedHosts: true, // Allow all hosts to prevent "Host not allowed" errors
+    proxy: {
+      '/api/bom': {
+        target: 'http://reg.bom.gov.au',
+        changeOrigin: true,
+        rewrite: () => '/fwo/IDW60901/IDW60901.94610.json',
+      },
+    },
   },
   build: {
     chunkSizeWarningLimit: 1500, // Firebase SDK is large
