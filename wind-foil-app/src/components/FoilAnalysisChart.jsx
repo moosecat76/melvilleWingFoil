@@ -23,7 +23,7 @@ const CustomTooltip = ({ active, payload, hasAltitude, speedUnit, speedMult }) =
     return null;
 };
 
-const FoilAnalysisChart = ({ analysisData, onHover, unit: propUnit }) => {
+const FoilAnalysisChart = ({ analysisData, onHover, selectedSegment = null, onSelectSegment = null, unit: propUnit }) => {
     const preferences = usePreferences();
     const activeUnit = propUnit || preferences.unit || 'knots';
     const speedMult = activeUnit === 'kmh' ? 3.6 : 1.94384;
@@ -37,8 +37,6 @@ const FoilAnalysisChart = ({ analysisData, onHover, unit: propUnit }) => {
         return null;
     }
 
-    // Prepare chart data - downsample to greatly improve JS rendering performance
-    // Ensure we preserve peak velocity within each downsampled bucket so short flights/peaks don't vanish visually
     const targetPoints = 500;
     const samplingRate = Math.max(1, Math.ceil(time.length / targetPoints));
 
@@ -56,7 +54,7 @@ const FoilAnalysisChart = ({ analysisData, onHover, unit: propUnit }) => {
         chartData.push({
             originalIndex: bestIdx,
             time: time[bestIdx],
-            timeMin: (time[bestIdx] / 60).toFixed(2), // formatted for X-Axis
+            timeMin: (time[bestIdx] / 60).toFixed(2),
             speed: velocity[bestIdx],
             displaySpeed: Number((velocity[bestIdx] * speedMult).toFixed(1)),
             altitude: altitude ? altitude[bestIdx] : 0,
@@ -65,7 +63,6 @@ const FoilAnalysisChart = ({ analysisData, onHover, unit: propUnit }) => {
         });
     }
 
-    // Calculate domain for Altitude to make sure it looks good inverted
     const minAlt = altitude && altitude.length > 0 ? Math.min(...altitude) : 0;
     const maxAlt = altitude && altitude.length > 0 ? Math.max(...altitude) : 0;
     const hasAltitude = mode ? mode === 'altitude' : (maxAlt - minAlt) > 0.1;
@@ -73,10 +70,45 @@ const FoilAnalysisChart = ({ analysisData, onHover, unit: propUnit }) => {
     const foilLineY = adaptiveThreshold || 1.95;
     const foilLineConverted = Number((foilLineY * speedMult).toFixed(1));
 
+    const handleChartClick = (e) => {
+        if (!onSelectSegment || !e || e.activeTooltipIndex === undefined || !chartData[e.activeTooltipIndex]) return;
+        const clickedOriginalIdx = chartData[e.activeTooltipIndex].originalIndex;
+        const matchedSeg = foilSegments.find(s => clickedOriginalIdx >= s.start && clickedOriginalIdx <= s.end);
+        if (matchedSeg) {
+            if (selectedSegment && selectedSegment.start === matchedSeg.start && selectedSegment.end === matchedSeg.end) {
+                onSelectSegment(null);
+            } else {
+                onSelectSegment(matchedSeg);
+            }
+        } else if (selectedSegment) {
+            onSelectSegment(null);
+        }
+    };
+
     return (
         <div style={{ width: '100%', height: 400, background: 'rgba(0,0,0,0.2)', borderRadius: '8px', padding: '10px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                <h4 style={{ margin: 0, color: 'var(--text-secondary)' }}>Flight Analysis</h4>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <h4 style={{ margin: 0, color: 'var(--text-secondary)' }}>Flight Analysis</h4>
+                    {selectedSegment && onSelectSegment && (
+                        <button
+                            type="button"
+                            onClick={() => onSelectSegment(null)}
+                            style={{
+                                background: 'rgba(56, 189, 248, 0.2)',
+                                border: '1px solid #38bdf8',
+                                color: '#38bdf8',
+                                borderRadius: '12px',
+                                padding: '2px 10px',
+                                fontSize: '0.72rem',
+                                fontWeight: 600,
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Flight #{selectedSegment.flightNumber || ''} Focused · Clear ✕
+                        </button>
+                    )}
+                </div>
                 {!hasAltitude && (
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: '10px' }}>
                         Adaptive foil threshold: ~{foilLineConverted} {speedUnit} ({foilLineY.toFixed(1)} m/s)
@@ -86,6 +118,7 @@ const FoilAnalysisChart = ({ analysisData, onHover, unit: propUnit }) => {
             <ResponsiveContainer width="100%" height="90%">
                 <ComposedChart
                     data={chartData}
+                    onClick={handleChartClick}
                     onMouseMove={(e) => {
                         if (e && e.activeTooltipIndex !== undefined && chartData[e.activeTooltipIndex] && onHover) {
                             onHover(chartData[e.activeTooltipIndex].originalIndex);
@@ -94,6 +127,7 @@ const FoilAnalysisChart = ({ analysisData, onHover, unit: propUnit }) => {
                     onMouseLeave={() => {
                         if (onHover) onHover(null);
                     }}
+                    style={{ cursor: onSelectSegment ? 'pointer' : 'default' }}
                 >
                     <CartesianGrid strokeDasharray="3 3" opacity={0.1} vertical={false} />
 
@@ -107,7 +141,6 @@ const FoilAnalysisChart = ({ analysisData, onHover, unit: propUnit }) => {
                         fontSize={12}
                     />
 
-                    {/* Primary Y-Axis: Speed in user unit */}
                     <YAxis
                         yAxisId="speed"
                         orientation="left"
@@ -116,7 +149,6 @@ const FoilAnalysisChart = ({ analysisData, onHover, unit: propUnit }) => {
                         fontSize={12}
                     />
 
-                    {/* Secondary Y-Axis: Altitude (m) - INVERTED (only when altitude is present) */}
                     {hasAltitude && (
                         <YAxis
                             yAxisId="altitude"
@@ -131,29 +163,31 @@ const FoilAnalysisChart = ({ analysisData, onHover, unit: propUnit }) => {
 
                     <Tooltip content={<CustomTooltip hasAltitude={hasAltitude} speedUnit={speedUnit} speedMult={speedMult} />} />
 
-                    {/* Dynamic Baseline replacing static ReferenceLine */}
                     {hasAltitude && (
                         <Line yAxisId="altitude" type="monotone" dataKey="baseline" stroke="#82ca9d" strokeDasharray="5 5" dot={false} strokeWidth={1} name="Base" />
                     )}
 
-                    {/* Adaptive speed threshold reference line when in speed-only mode */}
                     {!hasAltitude && (
                         <ReferenceLine yAxisId="speed" y={foilLineConverted} stroke="#4ade80" strokeDasharray="4 4" strokeOpacity={0.6} />
                     )}
 
                     {/* Foil Segments Background Overlay */}
-                    {foilSegments.map((seg, idx) => (
-                        <ReferenceArea
-                            key={idx}
-                            x1={time[seg.start]}
-                            x2={time[seg.end]}
-                            yAxisId="speed"
-                            fill="#4ade80"
-                            fillOpacity={0.22}
-                        />
-                    ))}
+                    {foilSegments.map((seg, idx) => {
+                        const isSelected = selectedSegment && selectedSegment.start === seg.start && selectedSegment.end === seg.end;
+                        return (
+                            <ReferenceArea
+                                key={idx}
+                                x1={time[seg.start]}
+                                x2={time[seg.end]}
+                                yAxisId="speed"
+                                fill={isSelected ? '#38bdf8' : '#4ade80'}
+                                fillOpacity={isSelected ? 0.45 : 0.22}
+                                stroke={isSelected ? '#38bdf8' : 'none'}
+                                strokeWidth={isSelected ? 2 : 0}
+                            />
+                        );
+                    })}
 
-                    {/* Lines */}
                     <Line
                         yAxisId="speed"
                         type="monotone"

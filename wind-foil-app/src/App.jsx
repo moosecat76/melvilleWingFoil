@@ -7,6 +7,7 @@ import { ToastProvider } from './context/ToastContext';
 import ForecastPage from './pages/ForecastPage';
 import SessionsPage from './pages/SessionsPage';
 import SessionDetailPage from './pages/SessionDetailPage';
+import StatsPage from './pages/StatsPage';
 import BottomNav from './components/BottomNav';
 import DebugOverlay from './components/DebugOverlay';
 
@@ -21,6 +22,7 @@ function App() {
                 <Route path="/" element={<ForecastPage />} />
                 <Route path="/sessions" element={<SessionsPage />} />
                 <Route path="/session/:id" element={<SessionDetailPage />} />
+                <Route path="/stats" element={<StatsPage />} />
               </Routes>
               <BottomNav />
               <DebugOverlay />

@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Wind, Book } from 'lucide-react';
+import { Wind, Book, BarChart2 } from 'lucide-react';
 
 const BottomNav = () => {
     return (
@@ -19,6 +19,13 @@ const BottomNav = () => {
             >
                 <Book size={22} />
                 <span>Sessions</span>
+            </NavLink>
+            <NavLink
+                to="/stats"
+                className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}
+            >
+                <BarChart2 size={22} />
+                <span>Stats</span>
             </NavLink>
         </nav>
     );

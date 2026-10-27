@@ -3,7 +3,6 @@ import { analyzeSession } from '../foilAnalysisService';
 
 describe('foilAnalysisService', () => {
     it('uses altitude mode when valid altitude changes are present', () => {
-        // 15 seconds: 0-4s drifting at alt=10m, 5-12s foiling at speed=2.5 m/s & alt=9.5m, 13-14s slow at alt=10m
         const time = Array.from({ length: 15 }, (_, i) => i);
         const velocity = [
             0.2, 0.2, 0.3, 0.3, 0.4,
@@ -27,14 +26,12 @@ describe('foilAnalysisService', () => {
         expect(result.stats.numberOfFlights).toBe(1);
         expect(parseFloat(result.stats.totalFoilTime)).toBeGreaterThan(0);
         expect(parseFloat(result.stats.topSpeed)).toBeGreaterThan(4.5);
+        expect(result.foilSegments[0].flightNumber).toBe(1);
+        expect(result.foilSegments[0].durationSec).toBe(7);
+        expect(result.foilSegments[0].topSpeedKts).toBeGreaterThan(4.5);
     });
 
     it('adaptively profiles speed distribution (~2 m/s entry) and ignores sub-foil slogging (<1.8 m/s)', () => {
-        // 40 seconds:
-        // 0-9s: displacement sailing / pumping attempts at 0.5 - 1.5 m/s (should NOT trigger foil)
-        // 10-20s: sudden takeoff surge onto foil (2.1 -> 3.8 m/s)
-        // 21-29s: drop off foil back to displacement slogging (0.6 - 1.4 m/s)
-        // 30-39s: second foil flight (2.2 -> 4.2 m/s)
         const time = Array.from({ length: 40 }, (_, i) => i);
         const velocity = [
             0.5, 0.7, 1.1, 1.4, 1.5, 1.3, 0.9, 0.7, 0.8, 1.0,
@@ -60,21 +57,16 @@ describe('foilAnalysisService', () => {
         expect(result.foilSegments[1].start).toBe(30);
         expect(result.foilSegments[1].end).toBe(39);
         expect(result.stats.totalRuns).toBe(1);
+        expect(result.stats.longestFlightSec).toBe(10);
     });
 
     it('detects multiple flights and separates runs when gap > 30s in adaptive speed mode', () => {
-        // 70 points, 1s apart
         const time = Array.from({ length: 70 }, (_, i) => i);
         const velocity = new Array(70).fill(0.7);
         const altitude = new Array(70).fill(0);
 
-        // Flight 1: t = 5..12 (7s duration at ~3.0 m/s)
         for (let t = 5; t <= 12; t++) velocity[t] = 3.0;
-
-        // Flight 2: t = 18..25 (gap = 6s -> same run)
         for (let t = 18; t <= 25; t++) velocity[t] = 3.2;
-
-        // Flight 3: t = 58..65 (gap = 33s -> second run)
         for (let t = 58; t <= 65; t++) velocity[t] = 3.5;
 
         const result = analyzeSession({
@@ -86,5 +78,70 @@ describe('foilAnalysisService', () => {
         expect(result.mode).toBe('speed');
         expect(result.stats.numberOfFlights).toBe(3);
         expect(result.stats.totalRuns).toBe(2);
+    });
+
+    it('detects foiling gybes vs wet gybes and computes tack symmetry from GPS latlng stream', () => {
+        // 50 seconds:
+        // t=0..4: displacement (0.8 m/s)
+        // t=5..25: continuous foiling flight (3.5 m/s) with a 100° foiling gybe around t=14..18
+        // t=26..30: displacement (0.8 m/s)
+        // t=31..40: foiling flight (3.4 m/s) into a wet gybe at t=40..44 where rider turns 95° and drops to 0.9 m/s
+        const n = 50;
+        const time = Array.from({ length: n }, (_, i) => i);
+        const velocity = new Array(n).fill(0.8);
+        const altitude = new Array(n).fill(0);
+        const heartrate = new Array(n).fill(145);
+
+        for (let t = 5; t <= 25; t++) {
+            velocity[t] = 3.5;
+            heartrate[t] = 132;
+        }
+        for (let t = 31; t <= 40; t++) {
+            velocity[t] = 3.4;
+            heartrate[t] = 135;
+        }
+        for (let t = 41; t <= 46; t++) {
+            velocity[t] = 1.0; // dropped off foil during turn exit
+            heartrate[t] = 158;
+        }
+
+        // Build GPS coordinates matching headings:
+        // t=0..14: heading East (90°)
+        // t=15..25: carves South-West (195°) -> 105° turn while staying on foil!
+        // t=26..39: heading East (90°)
+        // t=40..48: carves South-West (190°) -> 100° turn but drops off foil at t=41!
+        const latlng = [];
+        let lat = -32.013;
+        let lng = 115.829;
+        for (let t = 0; t < n; t++) {
+            let bearingDeg = 90;
+            if (t >= 15 && t <= 25) bearingDeg = 195;
+            else if (t === 39) bearingDeg = 140; // carving through apex on foil
+            else if (t >= 40) bearingDeg = 190;  // completes turn angle and touches down at t=41
+
+            const distM = velocity[t]; // 1s step
+            const rad = (bearingDeg * Math.PI) / 180;
+            lat += (distM / 111320) * Math.cos(rad);
+            lng += (distM / (111320 * Math.cos((lat * Math.PI) / 180))) * Math.sin(rad);
+            latlng.push([lat, lng]);
+        }
+
+        const result = analyzeSession(
+            {
+                time: { data: time },
+                velocity_smooth: { data: velocity },
+                altitude: { data: altitude },
+                latlng: { data: latlng },
+                heartrate: { data: heartrate },
+            },
+            { windDirection: 225 }
+        );
+
+        expect(result.maneuvers).toBeDefined();
+        expect(result.maneuvers.totalAttempts).toBe(2);
+        expect(result.maneuvers.completedTurns).toBe(1);
+        expect(result.maneuvers.wetTurns).toBe(1);
+        expect(result.maneuvers.completionRate).toBe(50);
+        expect(result.efficiency.avgFoilHeartRate).toBeLessThan(result.efficiency.avgPumpHeartRate);
     });
 });
