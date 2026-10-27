@@ -17,7 +17,7 @@ import SimilarSessionsCard from '../components/SimilarSessionsCard';
 import { getJournalEntries } from '../services/journalService';
 import { getStoredGeminiKey, setStoredGeminiKey } from '../services/aiCoachService';
 import { exportData, importData } from '../services/storageService';
-import { initiateGoogleFitAuth, handleGoogleFitCallback, getGoogleFitUserAsync, disconnectGoogleFit } from '../services/googleFitService';
+import { initiateGoogleFitAuth, handleGoogleFitCallback, getGoogleFitUserAsync, disconnectGoogleFit, isValidGoogleFitOAuthState } from '../services/googleFitService';
 import { saveUserGear } from '../services/dbService';
 import { Download, Upload, Database, Wifi, Sparkles } from 'lucide-react';
 
@@ -179,7 +179,7 @@ const ForecastPage = () => {
         const params = new URLSearchParams(window.location.search);
         const code = params.get('code');
         const state = params.get('state');
-        if (code && state === 'googlefit') {
+        if (code && isValidGoogleFitOAuthState(state)) {
             window.history.replaceState({}, document.title, window.location.pathname);
             setGfitAuthLoading(true);
             handleGoogleFitCallback(code, user?.uid)

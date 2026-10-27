@@ -239,7 +239,7 @@ export const buildDeterministicGamePlan = (payload) => {
         ? `In ${bestPast.windKts} kts here previously, you logged a ${bestPast.rating}★ session (${bestPast.percentFoil ? `${bestPast.percentFoil}% on foil` : bestPast.gearUsed}).`
         : `Conditions are lined up at ${spotName} with ${windKts} kts (${windDirDeg}°).`;
 
-    const briefing = `${ spotName } is forecasting ${windKts} kts gusting ${gustKts} kts (${windDirDeg}°)${tideM != null ? ` with a ${Number(tideM).toFixed(2)}m tide` : ''}—rig your ${recommendedGear}. ${pastContext}`;
+    const briefing = `${spotName} is forecasting ${windKts} kts gusting ${gustKts} kts (${windDirDeg}°)${tideM != null ? ` with a ${Number(tideM).toFixed(2)}m tide` : ''}—rig your ${recommendedGear}. ${pastContext}`;
 
     let gearTip = `Set your mast base in your standard middle position for ${recommendedGear}.`;
     if (spread >= 7.5) {
@@ -263,13 +263,22 @@ export const buildDeterministicGamePlan = (payload) => {
 };
 
 /**
- * Helper to invoke `/api/ai-coach` with optional user key header.
+ * Helper to invoke `/api/ai-coach` with optional user key header and Firebase Auth ID token.
  */
 const callCoachEndpoint = async (mode, payload) => {
     const headers = { 'Content-Type': 'application/json' };
     const storedKey = getStoredGeminiKey();
     if (storedKey) {
         headers['x-gemini-api-key'] = storedKey;
+    }
+    try {
+        const { auth } = await import('./firebaseSetup');
+        if (auth?.currentUser && typeof auth.currentUser.getIdToken === 'function') {
+            const idToken = await auth.currentUser.getIdToken();
+            if (idToken) headers['Authorization'] = `Bearer ${idToken}`;
+        }
+    } catch (_) {
+        // Ignore if Firebase auth is not initialized
     }
 
     const res = await fetch('/api/ai-coach', {

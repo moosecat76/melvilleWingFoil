@@ -4,7 +4,6 @@ import { useAuth } from '../context/AuthContext';
 import { getJournalEntries, addJournalEntry, deleteJournalEntry, updateJournalEntry } from '../services/journalService';
 import { Book, Plus, Trash2, Edit2, Calendar, Wind, Clock, MapPin, X, Activity } from 'lucide-react';
 import { format } from 'date-fns';
-import { getActivities, getStravaUser, getActivityStreams, initiateStravaAuth } from '../services/stravaService';
 import SessionMap from './SessionMap';
 import { analyzeSession } from '../services/foilAnalysisService';
 import FoilAnalysisChart from './FoilAnalysisChart';
@@ -64,16 +63,7 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
         fetchEntries();
     }, [currentLocation, user?.uid, authLoading]);
 
-    // Check Strava connection status
-    useEffect(() => {
-        const checkStrava = async () => {
-            if (authLoading) return;
-            const su = await getStravaUser(user?.uid);
-            setStravaConnected(!!su);
-        };
-        checkStrava();
-    }, [user?.uid, authLoading]);
-
+    
     // Smart Fill Logic
     useEffect(() => {
         if (!isAdding || editId || !weatherData || weatherData.length === 0) return;
@@ -166,58 +156,9 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
     const [showActivityPicker, setShowActivityPicker] = useState(false);
     const [isFetchingActivities, setIsFetchingActivities] = useState(false);
 
-    const fetchStravaActivities = async () => {
-        setIsFetchingActivities(true);
-        try {
-            const acts = await getActivities(user?.uid);
-            if (Array.isArray(acts) && acts.length > 0) {
-                setStravaActivities(acts);
-                setShowActivityPicker(true);
-            } else {
-                alert('No recent activities found on your Strava account.');
-            }
-        } catch (e) {
-            console.error('Error fetching Strava activities:', e);
-            alert(e.message || 'Failed to load Strava activities. Check connection.');
-            if (e.message && (e.message.includes('expired') || e.message.includes('Forbidden') || e.message.includes('permission') || e.message.includes('reconnect'))) {
-                setStravaConnected(false);
-            }
-        } finally {
-            setIsFetchingActivities(false);
-        }
-    };
-
-    const handleSelectActivity = async (activity) => {
-        const date = new Date(activity.start_date);
-
-        // Auto-fill from Strava
-        setLogDate(format(date, 'yyyy-MM-dd'));
-        setLogTime(format(date, 'HH:mm'));
-
-        // Fetch detailed streams for analysis
-        let streams = null;
-        try {
-            streams = await getActivityStreams(activity.id, user?.uid);
-        } catch (e) {
-            console.error('Failed to fetch streams', e);
-        }
-
-        // Calculate Stats
-        const basicStats = legacyCalculateStats(streams, activity.max_speed, activity.distance);
-        // Run Full Analysis
-        const analysis = analyzeSession(streams);
-
-        setNewEntry(prev => ({
-            ...prev,
-            stravaActivityId: activity.id,
-            mapPolyline: activity.map?.summary_polyline,
-            streams: streams,
-            notes: prev.notes || activity.name,
-            activityStats: basicStats,
-            foilAnalysis: analysis
-        }));
-        setShowActivityPicker(false);
-    };
+    const fetchStravaActivities = async () => {};
+    const handleSelectActivity = async () => {};
+    const initiateStravaAuth = () => {};
 
     return (
         <div className="card">

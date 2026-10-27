@@ -20,5 +20,6 @@ wind-foil-app/*.txt
 wind-foil-app/logs/
 *.log
 
-# Example data backups
-wind-foil-app/example-data/wind-foil-backup-*.json
+# Personal session data backups
+wind-foil-app/example-data/*.json
+wind-foil-app/public/*backup*.json

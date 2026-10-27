@@ -28,12 +28,9 @@
  */
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const CLIENT_ID         = import.meta.env.VITE_GOOGLE_FIT_CLIENT_ID;
-// Only used on localhost — Vite can't run serverless functions, so we call Google directly.
-// On Vercel the serverless function handles the exchange and this is never read.
-const CLIENT_SECRET_DEV = import.meta.env.VITE_GOOGLE_FIT_CLIENT_SECRET;
-
-const IS_LOCAL_DEV = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+const CLIENT_ID = import.meta.env.VITE_GOOGLE_FIT_CLIENT_ID;
+// NOTE: Client secret is NEVER read in client code or prefixed with VITE_.
+// Both production (Vercel) and local dev (Vite middleware) exchange tokens via /api/google-fit-token.
 
 // Google Health API v4 scopes (replaces the deprecated fitness.* scopes)
 const SCOPES = [
@@ -43,8 +40,8 @@ const SCOPES = [
 ].join(' ');
 
 const OAUTH_ENDPOINT   = 'https://accounts.google.com/o/oauth2/v2/auth';
-const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
-const TOKEN_API        = '/api/google-fit-token';   // Vercel serverless (production only)
+const TOKEN_API        = '/api/google-fit-token';
+const OAUTH_STATE_KEY  = 'ghealth_oauth_state';
 
 // localStorage keys — new prefix to avoid conflicts with old Fit tokens
 const LS_ACCESS_TOKEN  = 'ghealth_access_token';
@@ -54,49 +51,31 @@ const LS_EXPIRES_AT    = 'ghealth_expires_at';
 // Google Health API v4 base URL
 const HEALTH_BASE = 'https://health.googleapis.com/v4/users/me';
 
-// ── Internal: unified token exchange (local dev vs production) ────────────────
+// ── Internal: server-side token exchange (/api/google-fit-token) ──────────────
 /**
- * On localhost: calls Google directly (VITE_GOOGLE_FIT_CLIENT_SECRET available in bundle).
- * On Vercel:   calls /api/google-fit-token (client secret stays server-side).
+ * Calls /api/google-fit-token (handled by Vercel serverless function in production
+ * and Vite server middleware in local dev). The client secret never leaves the server.
  */
 const _exchangeToken = async (body) => {
-    if (IS_LOCAL_DEV) {
-        if (!CLIENT_SECRET_DEV) {
-            throw new Error('Add VITE_GOOGLE_FIT_CLIENT_SECRET to your .env file for local dev.');
+    const response = await fetch(TOKEN_API, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+    });
+    const text = await response.text();
+    let data;
+    try { data = JSON.parse(text); }
+    catch { throw new Error('Token exchange: unexpected server response — ' + text.slice(0, 120)); }
+    if (!response.ok) {
+        if (data.error === 'invalid_grant') {
+            localStorage.removeItem(LS_ACCESS_TOKEN);
+            localStorage.removeItem(LS_REFRESH_TOKEN);
+            localStorage.removeItem(LS_EXPIRES_AT);
+            throw new Error('Google Health session expired. Please reconnect in Settings.');
         }
-        // Google's OAuth2 token endpoint requires application/x-www-form-urlencoded, not JSON.
-        const formBody = new URLSearchParams({ ...body, client_id: CLIENT_ID, client_secret: CLIENT_SECRET_DEV });
-        const response = await fetch(GOOGLE_TOKEN_URL, {
-            method:  'POST',
-            body:    formBody,
-        });
-        const data = await response.json();
-        if (!response.ok) {
-            console.error('[GHealth] Token exchange failed. Google error:', JSON.stringify(data));
-            // invalid_grant = refresh token revoked / expired / wrong scopes.
-            // Clear stale tokens so the user isn't stuck in a retry loop.
-            if (data.error === 'invalid_grant') {
-                localStorage.removeItem(LS_ACCESS_TOKEN);
-                localStorage.removeItem(LS_REFRESH_TOKEN);
-                localStorage.removeItem(LS_EXPIRES_AT);
-                throw new Error('Google Health session expired. Please reconnect in Settings.');
-            }
-            throw new Error(data.error_description || data.error || 'Token exchange failed');
-        }
-        return data;
-    } else {
-        const response = await fetch(TOKEN_API, {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify(body),
-        });
-        const text = await response.text();
-        let data;
-        try { data = JSON.parse(text); }
-        catch { throw new Error('Token exchange: unexpected server response — ' + text.slice(0, 120)); }
-        if (!response.ok) throw new Error(data.error_description || data.error || 'Token exchange failed');
-        return data;
+        throw new Error(data.error_description || data.error || 'Token exchange failed');
     }
+    return data;
 };
 
 // ── Step 1 — Redirect to Google consent screen ───────────────────────────────
@@ -107,6 +86,12 @@ export const initiateGoogleFitAuth = () => {
     }
 
     const redirectUri = window.location.origin;
+    const nonce = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? `googlefit_${crypto.randomUUID()}`
+        : `googlefit_${Math.random().toString(36).slice(2)}`;
+    try {
+        sessionStorage.setItem(OAUTH_STATE_KEY, nonce);
+    } catch (_) { /* ignore storage errors */ }
 
     const params = new URLSearchParams({
         client_id:     CLIENT_ID,
@@ -115,10 +100,20 @@ export const initiateGoogleFitAuth = () => {
         scope:         SCOPES,
         access_type:   'offline',    // Ensures we receive a refresh_token
         prompt:        'consent',    // Force consent to always receive a fresh refresh_token
-        state:         'googlefit',  // Distinguish from any other OAuth callback
+        state:         nonce,        // CSRF protection token verified on callback
     });
 
     window.location.href = `${OAUTH_ENDPOINT}?${params}`;
+};
+
+export const isValidGoogleFitOAuthState = (stateParam) => {
+    if (!stateParam || !String(stateParam).startsWith('googlefit')) return false;
+    try {
+        const expected = sessionStorage.getItem(OAUTH_STATE_KEY);
+        sessionStorage.removeItem(OAUTH_STATE_KEY);
+        if (expected) return stateParam === expected;
+    } catch (_) { /* ignore */ }
+    return stateParam === 'googlefit';
 };
 
 // ── Step 2 — Handle the redirect-back callback ────────────────────────────────

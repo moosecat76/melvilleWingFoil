@@ -5,7 +5,6 @@ import {
     deleteJournalEntry as dbDeleteJournalEntry,
     getEntriesForLocation as dbGetEntriesForLocation,
     hydrateJournalEntry,
-    normalizeEntryDate,
     isSameJournalEntry,
 } from './dbService';
 
@@ -25,18 +24,6 @@ const getLocalEntries = () => {
         return parsed.map((e) => hydrateJournalEntry(e));
     } catch (e) {
         console.warn('[journalService] Failed to parse local journal entries:', e);
-        return [];
-    }
-};
-
-const fetchHistoricalSeedEntries = async () => {
-    if (typeof fetch !== 'function') return [];
-    try {
-        const res = await fetch('/historical-sessions-backup.json');
-        if (!res.ok) return [];
-        const data = await res.json();
-        return Array.isArray(data) ? data : [];
-    } catch (_) {
         return [];
     }
 };
@@ -61,7 +48,7 @@ export const getJournalEntries = async (uid = null) => {
         const localEntries = getLocalEntries();
         const merged = [...cloudEntries];
 
-        // 1. Merge any local entries that aren't in Firestore yet (or enrich missing streams)
+        // Merge any local entries that aren't in Firestore yet (or enrich missing streams)
         for (const localEntry of localEntries) {
             const idx = merged.findIndex((e) => isSameEntry(e, localEntry));
             if (idx === -1) {
@@ -83,65 +70,10 @@ export const getJournalEntries = async (uid = null) => {
             }
         }
 
-        // 2. Restore historical backup sessions if missing (e.g. if earlier migration failed on nested arrays)
-        const seedFlagKey = `melvill_historical_seeded_v1_${uid}`;
-        if (localStorage.getItem(seedFlagKey) !== 'true' || merged.length <= 1) {
-            const seedEntries = await fetchHistoricalSeedEntries();
-            if (seedEntries.length > 0) {
-                let allSynced = true;
-                for (const seedEntry of seedEntries) {
-                    const idx = merged.findIndex((e) => isSameEntry(e, seedEntry));
-                    if (idx === -1) {
-                        try {
-                            const saved = await dbAddJournalEntry(uid, seedEntry);
-                            merged.push(hydrateJournalEntry(saved));
-                        } catch (err) {
-                            console.warn('[journalService] Failed to seed historical entry to Firestore:', err);
-                            merged.push(hydrateJournalEntry(seedEntry));
-                            allSynced = false;
-                        }
-                    } else if (!merged[idx].streams && seedEntry.streams) {
-                        const enriched = hydrateJournalEntry({
-                            ...merged[idx],
-                            streams: seedEntry.streams,
-                            mapPolyline: seedEntry.mapPolyline || merged[idx].mapPolyline,
-                        });
-                        merged[idx] = enriched;
-                        try {
-                            await dbUpdateJournalEntry(uid, enriched.id, enriched);
-                        } catch (err) {
-                            console.warn('[journalService] Failed to backfill streams on historical entry:', err);
-                            allSynced = false;
-                        }
-                    }
-                }
-                if (allSynced) {
-                    try {
-                        localStorage.setItem(seedFlagKey, 'true');
-                    } catch (_) { /* ignore storage quota errors */ }
-                }
-            }
-        }
-
         return sortByDateDesc(merged);
     }
 
     const localEntries = getLocalEntries();
-    if (localEntries.length <= 1 && localStorage.getItem('melvill_historical_seeded_local_v1') !== 'true') {
-        const seedEntries = await fetchHistoricalSeedEntries();
-        if (seedEntries.length > 0) {
-            const merged = [...localEntries];
-            for (const seedEntry of seedEntries) {
-                if (!merged.some((e) => isSameEntry(e, seedEntry))) {
-                    merged.push(hydrateJournalEntry(seedEntry));
-                }
-            }
-            try {
-                localStorage.setItem('melvill_historical_seeded_local_v1', 'true');
-            } catch (_) { /* ignore */ }
-            return sortByDateDesc(merged);
-        }
-    }
     return sortByDateDesc(localEntries);
 };
 

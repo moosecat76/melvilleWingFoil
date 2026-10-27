@@ -1,7 +1,7 @@
 /**
  * api/google-fit-token.js
  *
- * Vercel Serverless Function: /api/google-fit-token
+ * Vercel Serverless Function (& Vite dev middleware): /api/google-fit-token
  *
  * Handles two operations securely server-side:
  *   1. Authorization code → access/refresh token exchange (grant_type: 'authorization_code')
@@ -11,13 +11,32 @@
  * The token exchange endpoint (oauth2.googleapis.com/token) is the same for both APIs.
  *
  * The CLIENT_SECRET is NEVER sent to the browser.
- * The redirect_uri must be passed from the client because Google requires it to
- * exactly match what was used in the original authorization request.
  */
+
+const DEFAULT_ALLOWED_ORIGINS = new Set([
+    'https://melvillewingfoil.vercel.app',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+]);
+
+function isAllowedOrigin(origin) {
+    if (!origin) return true; // Same-origin requests without Origin header
+    if (DEFAULT_ALLOWED_ORIGINS.has(origin)) return true;
+    const extra = process.env.ALLOWED_ORIGIN;
+    if (extra && extra.split(',').map(s => s.trim()).includes(origin)) return true;
+    return false;
+}
+
 export default async function handler(req, res) {
-    // ── CORS ──────────────────────────────────────────────────────────────────
-    const origin = req.headers.origin || '';
-    res.setHeader('Access-Control-Allow-Origin', origin);
+    // ── Strict CORS Allowlist ────────────────────────────────────────────────
+    const origin = req.headers?.origin || '';
+    if (origin && !isAllowedOrigin(origin)) {
+        return res.status(403).json({ error: 'Origin not allowed' });
+    }
+    if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+    }
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
@@ -68,8 +87,6 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: `Unsupported grant_type: ${grant_type}` });
     }
 
-    console.log('[google-fit-token] Token exchange, grant_type:', grant_type);
-
     try {
         // Google's OAuth2 token endpoint requires application/x-www-form-urlencoded, not JSON.
         const response = await fetch('https://oauth2.googleapis.com/token', {
@@ -79,12 +96,8 @@ export default async function handler(req, res) {
 
         const data = await response.json();
 
-        console.log('[google-fit-token] Google response status:', response.status,
-            '| has access_token:', !!data.access_token,
-            '| has refresh_token:', !!data.refresh_token);
-
         if (!response.ok) {
-            console.error('[google-fit-token] Google exchange failed:', data);
+            console.error('[google-fit-token] Google exchange failed:', data.error || response.status);
             return res.status(response.status).json(data);
         }
 

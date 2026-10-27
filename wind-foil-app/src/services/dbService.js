@@ -321,27 +321,6 @@ export const saveCurrentLocationId = async (uid, locationId) => {
     await setDoc(locDoc(uid), { currentId: locationId }, { merge: true });
 };
 
-// ─── Strava Tokens (per-user) ───────────────────────
-const stravaDoc = (uid) => doc(db, 'users', uid, 'strava', 'tokens');
-
-export const getStravaTokens = async (uid) => {
-    const snap = await getDoc(stravaDoc(uid));
-    return snap.exists() ? snap.data() : null;
-};
-
-export const saveStravaTokens = async (uid, tokenData) => {
-    await setDoc(stravaDoc(uid), { ...tokenData, updatedAt: serverTimestamp() }, { merge: true });
-};
-
-export const deleteStravaTokens = async (uid) => {
-    if (!uid) return;
-    try {
-        await deleteDoc(stravaDoc(uid));
-    } catch (e) {
-        console.error('Failed to delete Strava tokens from Firestore:', e);
-    }
-};
-
 // ─── Google Health Tokens (per-user) ─────────────────
 // Stored at the same Firestore path for backwards compatibility.
 // Previously called "Google Fit" tokens; now used for Google Health API v4.
@@ -436,24 +415,7 @@ export const migrateLocalStorageToFirestore = async (uid) => {
         console.error('Locations migration failed', e);
     }
 
-    // 4. Strava tokens
-    try {
-        const stravaAccess = localStorage.getItem('strava_access_token');
-        if (stravaAccess) {
-            const cloudStrava = await getStravaTokens(uid);
-            if (!cloudStrava) {
-                await saveStravaTokens(uid, {
-                    access_token: stravaAccess,
-                    refresh_token: localStorage.getItem('strava_refresh_token'),
-                    expires_at: localStorage.getItem('strava_expires_at'),
-                    athlete: JSON.parse(localStorage.getItem('strava_athlete') || 'null'),
-                });
-                console.log('Migrated Strava tokens to Firestore');
-            }
-        }
-    } catch (e) {
-        console.error('Strava token migration failed', e);
-    }
+    
 };
 
 // ─── Restore backup directly to Firestore ────────────

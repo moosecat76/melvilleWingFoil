@@ -11,6 +11,58 @@
  */
 import { GoogleGenAI } from '@google/genai';
 
+const DEFAULT_ALLOWED_ORIGINS = new Set([
+    'https://melvillewingfoil.vercel.app',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+]);
+
+function isAllowedOrigin(origin) {
+    if (!origin) return true; // Same-origin requests without Origin header
+    if (DEFAULT_ALLOWED_ORIGINS.has(origin)) return true;
+    const extra = process.env.ALLOWED_ORIGIN;
+    if (extra && extra.split(',').map(s => s.trim()).includes(origin)) return true;
+    return false;
+}
+
+/**
+ * Verifies a Firebase Auth ID token via Google Identity Toolkit when using the server's GEMINI_API_KEY.
+ */
+async function verifyFirebaseIdToken(authHeader) {
+    if (!authHeader || !String(authHeader).startsWith('Bearer ')) {
+        return { valid: false, reason: 'missing_token' };
+    }
+    const idToken = String(authHeader).slice(7).trim();
+    const firebaseApiKey = process.env.VITE_FIREBASE_API_KEY;
+    if (!firebaseApiKey) {
+        return { valid: false, reason: 'missing_firebase_config' };
+    }
+
+    try {
+        const resp = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseApiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idToken }),
+        });
+        if (!resp.ok) return { valid: false, reason: 'invalid_token' };
+        const data = await resp.json();
+        const account = data?.users?.[0];
+        if (!account?.localId) return { valid: false, reason: 'invalid_user' };
+
+        const allowedEmailsRaw = process.env.ALLOWED_USER_EMAIL || process.env.VITE_ALLOWED_USER_EMAIL;
+        if (allowedEmailsRaw) {
+            const allowedList = allowedEmailsRaw.split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+            const userEmail = (account.email || '').toLowerCase();
+            if (allowedList.length > 0 && !allowedList.includes(userEmail)) {
+                return { valid: false, reason: 'unauthorized_email' };
+            }
+        }
+        return { valid: true, uid: account.localId, email: account.email };
+    } catch {
+        return { valid: false, reason: 'verification_failed' };
+    }
+}
+
 const TAGS_JSON_SCHEMA = {
     type: 'object',
     properties: {
@@ -85,16 +137,37 @@ const GAME_PLAN_JSON_SCHEMA = {
 };
 
 export default async function handler(req, res) {
-    const origin = req.headers?.origin || '*';
-    res.setHeader('Access-Control-Allow-Origin', origin);
+    const origin = req.headers?.origin || '';
+    if (origin && !isAllowedOrigin(origin)) {
+        return res.status(403).json({ error: 'Origin not allowed' });
+    }
+    if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+    }
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-gemini-api-key');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-gemini-api-key');
 
     if (req.method === 'OPTIONS') return res.status(200).end();
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
     const headerKey = req.headers?.['x-gemini-api-key'];
-    const apiKey = (headerKey && String(headerKey).trim()) || process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+    const userProvidedKey = headerKey && String(headerKey).trim();
+    const serverKey = process.env.GEMINI_API_KEY;
+
+    // If relying on the server's GEMINI_API_KEY, require an authenticated Firebase user
+    if (!userProvidedKey && serverKey) {
+        const authCheck = await verifyFirebaseIdToken(req.headers?.authorization);
+        if (!authCheck.valid) {
+            return res.status(200).json({
+                fallback: true,
+                reason: 'unauthenticated',
+                message: 'Sign in required to use server Gemini API key; using local deterministic coach.'
+            });
+        }
+    }
+
+    const apiKey = userProvidedKey || serverKey;
 
     if (!apiKey) {
         return res.status(200).json({
