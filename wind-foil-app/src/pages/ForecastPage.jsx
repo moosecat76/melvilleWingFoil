@@ -61,6 +61,29 @@ const ForecastPage = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
+    // Responsive Forecast Horizon: 3 days on mobile (<= 768px), 7 days on other views
+    const [forecastDays, setForecastDays] = useState(() => {
+        if (typeof window !== 'undefined') {
+            return window.innerWidth <= 768 ? 3 : 7;
+        }
+        return 7;
+    });
+
+    useEffect(() => {
+        if (typeof window === 'undefined' || !window.matchMedia) return;
+        const mql = window.matchMedia('(max-width: 768px)');
+        const handleViewportChange = (e) => {
+            setForecastDays(e.matches ? 3 : 7);
+        };
+        if (mql.addEventListener) {
+            mql.addEventListener('change', handleViewportChange);
+            return () => mql.removeEventListener('change', handleViewportChange);
+        } else if (mql.addListener) {
+            mql.addListener(handleViewportChange);
+            return () => mql.removeListener(handleViewportChange);
+        }
+    }, []);
+
     // Gear & Historical Sessions State
     const [userGear, setUserGear] = useState([]);
     const [userSessions, setUserSessions] = useState([]);
@@ -182,8 +205,16 @@ const ForecastPage = () => {
 
     const chartData = useMemo(() => {
         if (!data || data.length === 0) return [];
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+
+        const startCutoff = forecastDays === 3 ? startOfToday : oneDayAgo;
+        const endCutoff = forecastDays === 3
+            ? new Date(startOfToday.getTime() + 3 * 24 * 3600 * 1000)
+            : null;
+
         return data
-            .filter(d => d.rawDate >= oneDayAgo)
+            .filter(d => d.rawDate >= startCutoff && (!endCutoff || d.rawDate <= endCutoff))
             .map(d => {
                 const s = (unit === 'knots' ? (d.speed || 0) * 0.539957 : (d.speed || 0));
                 const g = (unit === 'knots' ? (d.gusts || 0) * 0.539957 : (d.gusts || 0));
@@ -193,7 +224,7 @@ const ForecastPage = () => {
                     chartGusts: Number(g.toFixed(1))
                 };
             });
-    }, [data, unit, oneDayAgo]);
+    }, [data, unit, oneDayAgo, forecastDays]);
 
     const nightBands = useMemo(() => {
         if (!chartData || chartData.length === 0) return [];
@@ -536,10 +567,30 @@ const ForecastPage = () => {
                     locationId={currentLocation.id}
                 />
 
-                {/* Main 7-Day Chart with Gust Band & Nighttime Shading */}
+                {/* Main Forecast Chart (3-Day on Mobile, 7-Day on Desktop) with Gust Band & Nighttime Shading */}
                 <div className="glass-panel" style={{ padding: '2rem', height: '420px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '1rem' }}>
-                        <h3 className="card-title" style={{ margin: 0 }}>7-Day Forecast</h3>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <h3 className="card-title" style={{ margin: 0 }}>{forecastDays}-Day Forecast</h3>
+                            <div className="unit-toggle" style={{ transform: 'scale(0.85)', transformOrigin: 'left center' }}>
+                                <button
+                                    type="button"
+                                    className={forecastDays === 3 ? 'active' : ''}
+                                    onClick={() => setForecastDays(3)}
+                                    title="Show 3-day forecast"
+                                >
+                                    3D
+                                </button>
+                                <button
+                                    type="button"
+                                    className={forecastDays === 7 ? 'active' : ''}
+                                    onClick={() => setForecastDays(7)}
+                                    title="Show 7-day forecast"
+                                >
+                                    7D
+                                </button>
+                            </div>
+                        </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                             <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 <span style={{ width: '12px', height: '2px', background: 'var(--accent-primary)', display: 'inline-block' }} />
@@ -574,7 +625,7 @@ const ForecastPage = () => {
                                 stroke="var(--text-secondary)"
                                 fontSize={12}
                                 tickMargin={10}
-                                minTickGap={60}
+                                minTickGap={forecastDays === 3 ? 35 : 60}
                                 tickFormatter={(val) => {
                                     const d = new Date(val);
                                     return format(d, 'EEE HH:mm');
@@ -668,7 +719,7 @@ const ForecastPage = () => {
                                             x={d.time}
                                             stroke="none"
                                             label={{
-                                                value: d.rawDate.toLocaleDateString('en-US', { weekday: 'long' }),
+                                                value: d.rawDate.toLocaleDateString('en-US', { weekday: forecastDays === 3 ? 'short' : 'long' }),
                                                 position: 'insideTop',
                                                 fill: 'var(--text-secondary)',
                                                 fontSize: 12,
