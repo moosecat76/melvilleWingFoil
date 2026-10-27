@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { useLocation } from '../context/LocationContext';
-import { MapPin, Plus, Trash2, X, Edit2, Save, Compass, Map } from 'lucide-react';
+import { useLocation, isValidCoordinates } from '../context/LocationContext';
+import { useToast } from '../context/ToastContext';
+import { MapPin, Plus, Trash2, X, Edit2, Save, Compass, Map, AlertCircle } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Polygon, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -55,8 +56,10 @@ const MapClickHandler = ({ onPick }) => {
 };
 
 const LocationPickerMap = ({ lat, lon, idealMin, idealMax, onPick }) => {
-    const parsedLat = parseFloat(lat) || -32.013032;
-    const parsedLon = parseFloat(lon) || 115.829474;
+    const rawLat = parseFloat(lat);
+    const rawLon = parseFloat(lon);
+    const parsedLat = (!isNaN(rawLat) && rawLat >= -90 && rawLat <= 90) ? rawLat : -32.013032;
+    const parsedLon = (!isNaN(rawLon) && rawLon >= -180 && rawLon <= 180) ? rawLon : 115.829474;
     const center = [parsedLat, parsedLon];
     const sectorPoints = computeSectorPoints(parsedLat, parsedLon, idealMin, idealMax);
 
@@ -93,8 +96,28 @@ const LocationPickerMap = ({ lat, lon, idealMin, idealMax, onPick }) => {
     );
 };
 
+const normalizeAndValidateCoords = (rawLat, rawLon) => {
+    let lat = parseFloat(rawLat);
+    let lon = parseFloat(rawLon);
+    let swapped = false;
+
+    if (!isNaN(lat) && !isNaN(lon) && Math.abs(lat) > 90 && Math.abs(lat) <= 180 && Math.abs(lon) <= 90) {
+        const tmp = lat;
+        lat = lon;
+        lon = tmp;
+        swapped = true;
+    }
+
+    if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+        return { valid: false, error: 'Latitude must be between -90 and 90, and Longitude between -180 and 180.' };
+    }
+
+    return { valid: true, lat, lon, swapped };
+};
+
 const LocationManager = () => {
     const { locations, currentLocation, switchLocation, addLocation, deleteLocation, updateLocation } = useLocation();
+    const { showToast } = useToast();
     const [isAdding, setIsAdding] = useState(false);
     const [showAddMap, setShowAddMap] = useState(false);
     const [newLoc, setNewLoc] = useState({ name: '', lat: '', lon: '', idealMin: '135', idealMax: '270' });
@@ -106,8 +129,16 @@ const LocationManager = () => {
 
     const handleAdd = (e) => {
         e.preventDefault();
-        if (newLoc.name && newLoc.lat && newLoc.lon) {
-            addLocation(newLoc.name, newLoc.lat, newLoc.lon, newLoc.idealMin, newLoc.idealMax);
+        if (newLoc.name && newLoc.lat !== '' && newLoc.lon !== '') {
+            const check = normalizeAndValidateCoords(newLoc.lat, newLoc.lon);
+            if (!check.valid) {
+                showToast(check.error, 'error');
+                return;
+            }
+            if (check.swapped) {
+                showToast('Auto-swapped Latitude & Longitude to valid ranges', 'info');
+            }
+            addLocation(newLoc.name, check.lat, check.lon, newLoc.idealMin, newLoc.idealMax);
             setNewLoc({ name: '', lat: '', lon: '', idealMin: '135', idealMax: '270' });
             setShowAddMap(false);
             setIsAdding(false);
@@ -129,15 +160,24 @@ const LocationManager = () => {
 
     const handleUpdate = (e) => {
         e.preventDefault();
+        const check = normalizeAndValidateCoords(editForm.lat, editForm.lon);
+        if (!check.valid) {
+            showToast(check.error, 'error');
+            return;
+        }
+        if (check.swapped) {
+            showToast('Auto-swapped Latitude & Longitude to valid ranges', 'info');
+        }
         updateLocation(editingId, {
             name: editForm.name,
-            latitude: parseFloat(editForm.lat),
-            longitude: parseFloat(editForm.lon),
+            latitude: check.lat,
+            longitude: check.lon,
             idealMin: editForm.idealMin,
             idealMax: editForm.idealMax
         });
         setEditingId(null);
         setShowEditMap(false);
+        showToast('Location updated', 'success');
     };
 
     return (
@@ -172,7 +212,7 @@ const LocationManager = () => {
 
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                         <input
-                            placeholder="Latitude"
+                            placeholder="Lat (e.g. -32.01)"
                             type="number" step="any"
                             value={newLoc.lat}
                             onChange={e => setNewLoc({ ...newLoc, lat: e.target.value })}
@@ -180,7 +220,7 @@ const LocationManager = () => {
                             required
                         />
                         <input
-                            placeholder="Longitude"
+                            placeholder="Lon (e.g. 115.83)"
                             type="number" step="any"
                             value={newLoc.lon}
                             onChange={e => setNewLoc({ ...newLoc, lon: e.target.value })}
@@ -264,6 +304,7 @@ const LocationManager = () => {
                 {locations.map(loc => {
                     const isEditing = editingId === loc.id;
                     const isCurrent = currentLocation.id === loc.id;
+                    const coordsValid = isValidCoordinates(loc.latitude, loc.longitude);
 
                     if (isEditing) {
                         return (
@@ -281,7 +322,7 @@ const LocationManager = () => {
                                         value={editForm.lat}
                                         onChange={e => setEditForm({ ...editForm, lat: e.target.value })}
                                         style={{ flex: 1, padding: '6px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'transparent', color: 'white' }}
-                                        placeholder="Lat"
+                                        placeholder="Lat (-90 to 90)"
                                         required
                                     />
                                     <input
@@ -289,7 +330,7 @@ const LocationManager = () => {
                                         value={editForm.lon}
                                         onChange={e => setEditForm({ ...editForm, lon: e.target.value })}
                                         style={{ flex: 1, padding: '6px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'transparent', color: 'white' }}
-                                        placeholder="Lon"
+                                        placeholder="Lon (-180 to 180)"
                                         required
                                     />
                                     <button
@@ -373,17 +414,27 @@ const LocationManager = () => {
                                 background: isCurrent ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255,255,255,0.05)',
                                 borderRadius: '6px',
                                 cursor: 'pointer',
-                                border: isCurrent ? '1px solid var(--accent-primary)' : '1px solid transparent'
+                                border: !coordsValid
+                                    ? '1px solid #f87171'
+                                    : isCurrent
+                                        ? '1px solid var(--accent-primary)'
+                                        : '1px solid transparent'
                             }}
                             onClick={() => switchLocation(loc.id)}
                         >
                             <div>
-                                <span style={{ fontWeight: isCurrent ? 'bold' : 'normal', display: 'block' }}>{loc.name}</span>
-                                {loc.idealWindDirection && (
-                                    <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
-                                        Sector: {loc.idealWindDirection.min}°–{loc.idealWindDirection.max}°
-                                    </span>
-                                )}
+                                <span style={{ fontWeight: isCurrent ? 'bold' : 'normal', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    {loc.name}
+                                    {!coordsValid && (
+                                        <span style={{ fontSize: '0.68rem', color: '#f87171', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                            <AlertCircle size={12} /> Invalid Lat/Lon
+                                        </span>
+                                    )}
+                                </span>
+                                <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                                    {Number(loc.latitude).toFixed(4)}, {Number(loc.longitude).toFixed(4)}
+                                    {loc.idealWindDirection ? ` · Sector: ${loc.idealWindDirection.min}°–${loc.idealWindDirection.max}°` : ''}
+                                </span>
                             </div>
                             <div style={{ display: 'flex', gap: '4px' }}>
                                 <button

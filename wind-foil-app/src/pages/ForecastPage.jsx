@@ -13,6 +13,8 @@ import MapComponent from '../components/MapComponent';
 import GearSelector from '../components/GearSelector';
 import LocationManager from '../components/LocationManager';
 import BestTime from '../components/BestTime';
+import SimilarSessionsCard from '../components/SimilarSessionsCard';
+import { getJournalEntries } from '../services/journalService';
 import { exportData, importData } from '../services/storageService';
 import { initiateGoogleFitAuth, handleGoogleFitCallback, getGoogleFitUserAsync, disconnectGoogleFit } from '../services/googleFitService';
 import { saveUserGear } from '../services/dbService';
@@ -42,7 +44,7 @@ const CustomArrowDot = (props) => {
 };
 
 const ForecastPage = () => {
-    const { currentLocation } = useLocation();
+    const { currentLocation, resetToDefaultLocation } = useLocation();
     const { user, login, logout, loading: authLoading } = useAuth();
     const { unit, setUnit, unitLabel, formatSpeedFromKmh } = usePreferences();
     const { showToast } = useToast();
@@ -56,11 +58,12 @@ const ForecastPage = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    // Gear State
+    // Gear & Historical Sessions State
     const [userGear, setUserGear] = useState([]);
+    const [userSessions, setUserSessions] = useState([]);
     useEffect(() => {
         if (authLoading) return;
-        const fetchGear = async () => {
+        const fetchGearAndSessions = async () => {
             if (user?.uid) {
                 const { getUserGear } = await import('../services/dbService');
                 const gear = await getUserGear(user.uid);
@@ -68,8 +71,14 @@ const ForecastPage = () => {
             } else {
                 setUserGear(JSON.parse(localStorage.getItem('melvill_user_gear') || '[]'));
             }
+            try {
+                const entries = await getJournalEntries(user?.uid);
+                setUserSessions(entries || []);
+            } catch (e) {
+                console.warn('[ForecastPage] Failed to load journal entries:', e);
+            }
         };
-        fetchGear();
+        fetchGearAndSessions();
     }, [user?.uid, authLoading]);
 
     const handleSaveGear = async (items) => {
@@ -292,10 +301,47 @@ const ForecastPage = () => {
 
     // ── Conditional renders after all hooks are executed ──
     if (loading) return <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>Loading Forecast for {currentLocation.name}...</div>;
-    if (error) return <div className="app-container">Error: {error}</div>;
+    if (error) {
+        return (
+            <div className="app-container">
+                <header style={{ marginBottom: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                    <div>
+                        <h1 className="text-gradient" style={{ margin: 0, fontSize: '2.5rem', fontWeight: 800 }}>
+                            Wind Foil App
+                        </h1>
+                        <p style={{ color: 'var(--text-secondary)', marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Navigation size={16} /> {currentLocation.name} ({Number(currentLocation.latitude).toFixed(4)}, {Number(currentLocation.longitude).toFixed(4)})
+                        </p>
+                    </div>
+                </header>
+
+                <div className="glass-panel" style={{ padding: '1.5rem', marginBottom: '1.5rem', border: '1px solid rgba(248, 113, 113, 0.4)', background: 'rgba(248, 113, 113, 0.08)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#f87171', fontWeight: 700, fontSize: '1.05rem', marginBottom: '0.5rem' }}>
+                        <AlertTriangle size={20} />
+                        <span>{error}</span>
+                    </div>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', margin: '0 0 1rem 0' }}>
+                        Could not fetch forecast for <strong>{currentLocation.name}</strong> at coordinates <code>{currentLocation.latitude}, {currentLocation.longitude}</code>. You can edit or delete the location below, or switch back to Melville Waters.
+                    </p>
+                    <button
+                        onClick={resetToDefaultLocation}
+                        className="btn-primary"
+                        style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+                    >
+                        Reset to Melville Waters
+                    </button>
+                </div>
+
+                <LocationManager />
+            </div>
+        );
+    }
 
     const currentRating = current ? getWindRating(current.speed, current.direction, currentLocation.idealWindDirection) : { label: '-', color: 'grey', rating: 0 };
-    const gear = getGearRecommendation(current?.speed, userGear);
+    const gear = getGearRecommendation(current?.speed, userGear, {
+        sessions: userSessions,
+        gustsKmh: current?.gusts
+    });
 
     const displayedSpeed = formatSpeedFromKmh(current?.speed);
     const displayedGusts = formatSpeedFromKmh(current?.gusts);
@@ -348,6 +394,8 @@ const ForecastPage = () => {
                         idealWindDirection={currentLocation.idealWindDirection}
                         daily={daily}
                         unit={unit}
+                        sessions={userSessions}
+                        locationId={currentLocation.id}
                     />
                 </div>
 
@@ -426,8 +474,20 @@ const ForecastPage = () => {
                                     </div>
                                 ) : (
                                     <>
-                                        <div style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text-primary)', marginTop: '0.25rem' }}>{gear.text}</div>
-                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{gear.sub || '(Add gear to personalize)'}</div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                                            <span style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text-primary)' }}>{gear.text}</span>
+                                            {gear.isDataDriven && (
+                                                <span style={{ fontSize: '0.68rem', fontWeight: 600, color: '#38bdf8', background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '999px', padding: '1px 7px' }}>
+                                                    Sweet Spot
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '2px' }}>{gear.sub || '(Add gear to personalize)'}</div>
+                                        {gear.gustAdvice && (
+                                            <div style={{ fontSize: '0.75rem', color: '#fbbf24', marginTop: '4px' }}>
+                                                ⚡ {gear.gustAdvice}
+                                            </div>
+                                        )}
                                     </>
                                 )}
                             </div>
@@ -459,6 +519,17 @@ const ForecastPage = () => {
                         )}
                     </div>
                 </div>
+
+                {/* Similar Past Sessions Context Card (Phase 4.3) */}
+                <SimilarSessionsCard
+                    forecastHourly={data}
+                    current={current}
+                    sessions={userSessions}
+                    userGear={userGear}
+                    idealWindDirection={currentLocation.idealWindDirection}
+                    daily={daily}
+                    locationId={currentLocation.id}
+                />
 
                 {/* Main 7-Day Chart with Gust Band & Nighttime Shading */}
                 <div className="glass-panel" style={{ padding: '2rem', height: '420px' }}>
