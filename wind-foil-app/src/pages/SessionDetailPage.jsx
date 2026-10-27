@@ -1,11 +1,13 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getJournalEntries } from '../services/journalService';
+import { getJournalEntries, updateJournalEntry } from '../services/journalService';
 import { analyzeSession, formatDurationSec } from '../services/foilAnalysisService';
-import { ArrowLeft, MapPin, Wind, Clock, Compass, Activity, Zap, Award } from 'lucide-react';
+import { generateSessionCoachDebrief, extractSessionCoachTags } from '../services/aiCoachService';
+import { ArrowLeft, MapPin, Wind, Clock, Compass, Activity, Zap, Award, Sparkles, RefreshCw, CheckCircle2, Sliders, Target } from 'lucide-react';
 import { format } from 'date-fns';
 import { useAuth } from '../context/AuthContext';
 import { usePreferences } from '../context/PreferencesContext';
+import { useToast } from '../context/ToastContext';
 
 const SessionMap = lazy(() => import('../components/SessionMap'));
 const FoilAnalysisChart = lazy(() => import('../components/FoilAnalysisChart'));
@@ -16,6 +18,7 @@ const SessionDetailPage = () => {
     const navigate = useNavigate();
     const { user } = useAuth();
     const { unit } = usePreferences();
+    const { showToast } = useToast();
     const speedUnit = unit === 'kmh' ? 'km/h' : 'kts';
     const ktsToUnit = unit === 'kmh' ? 1.852 : 1;
 
@@ -23,6 +26,7 @@ const SessionDetailPage = () => {
     const [analysis, setAnalysis] = useState(null);
     const [hoveredIndex, setHoveredIndex] = useState(null);
     const [selectedSegment, setSelectedSegment] = useState(null);
+    const [coachLoading, setCoachLoading] = useState(false);
 
     useEffect(() => {
         const fetchEntries = async () => {
@@ -40,6 +44,36 @@ const SessionDetailPage = () => {
         fetchEntries();
     }, [id, user?.uid]);
 
+    const handleGenerateCoachDebrief = async () => {
+        if (!entry || coachLoading) return;
+        setCoachLoading(true);
+        try {
+            const [debrief, tags] = await Promise.all([
+                generateSessionCoachDebrief(entry, analysis),
+                entry.coachTags ? Promise.resolve(entry.coachTags) : extractSessionCoachTags(entry, analysis)
+            ]);
+
+            const updatedEntry = {
+                ...entry,
+                coachDebrief: debrief,
+                coachTags: tags
+            };
+            setEntry(updatedEntry);
+            await updateJournalEntry(updatedEntry, user?.uid);
+            showToast(
+                debrief.source === 'gemini'
+                    ? `AI Coach Debrief generated via ${debrief.model}!`
+                    : 'Coach Debrief generated & saved!',
+                'success'
+            );
+        } catch (err) {
+            console.error('[SessionDetailPage] Coach debrief error:', err);
+            showToast('Failed to generate coach debrief: ' + err.message, 'error');
+        } finally {
+            setCoachLoading(false);
+        }
+    };
+
     if (!entry) {
         return (
             <div className="app-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: '1rem' }}>
@@ -56,6 +90,8 @@ const SessionDetailPage = () => {
     const maneuvers = analysis?.maneuvers || null;
     const efficiency = analysis?.efficiency || null;
     const foilSegments = analysis?.foilSegments || [];
+    const coachDebrief = entry.coachDebrief || null;
+    const coachTags = entry.coachTags || null;
 
     const fmtSpeedFromKts = (ktsVal) => {
         if (ktsVal == null || ktsVal === '–') return '–';
@@ -124,16 +160,16 @@ const SessionDetailPage = () => {
             )}
 
             {/* Notes & Gear */}
-            {(entry.notes || entry.gearUsed) && (
+            {(entry.notes || entry.gearUsed || coachTags) && (
                 <div className="glass-panel" style={{ padding: '16px', marginBottom: '1.5rem' }}>
                     {entry.notes && (
-                        <div style={{ marginBottom: entry.gearUsed ? '12px' : 0 }}>
+                        <div style={{ marginBottom: (entry.gearUsed || coachTags) ? '12px' : 0 }}>
                             <h3 style={{ margin: '0 0 6px 0', fontSize: '1rem', fontWeight: 600 }}>Notes</h3>
                             <p style={{ margin: 0, color: 'var(--text-secondary)', lineHeight: 1.6 }}>{entry.notes}</p>
                         </div>
                     )}
                     {entry.gearUsed && (
-                        <div>
+                        <div style={{ marginBottom: coachTags ? '12px' : 0 }}>
                             <h3 style={{ margin: '0 0 6px 0', fontSize: '1rem', fontWeight: 600 }}>Gear Used</h3>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                                 {entry.gearUsed.split(', ').map((g, i) => (
@@ -144,8 +180,117 @@ const SessionDetailPage = () => {
                             </div>
                         </div>
                     )}
+                    {coachTags && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                            <span style={{ fontSize: '0.72rem', fontWeight: 600, padding: '3px 9px', borderRadius: '12px', background: 'rgba(56, 189, 248, 0.14)', color: '#38bdf8' }}>
+                                Power: {coachTags.powerState?.replace('_', ' ')}
+                            </span>
+                            {coachTags.wingSizeSentiment && (
+                                <span style={{ fontSize: '0.72rem', padding: '3px 9px', borderRadius: '12px', background: 'rgba(74, 222, 128, 0.14)', color: '#4ade80' }}>
+                                    Wing: {coachTags.wingSizeSentiment.replace('_', ' ')}
+                                </span>
+                            )}
+                            {coachTags.foilSentiment && (
+                                <span style={{ fontSize: '0.72rem', padding: '3px 9px', borderRadius: '12px', background: 'rgba(167, 139, 250, 0.14)', color: '#a78bfa' }}>
+                                    Foil: {coachTags.foilSentiment.replace('_', ' ')}
+                                </span>
+                            )}
+                            {coachTags.fatigue && (
+                                <span style={{ fontSize: '0.72rem', padding: '3px 9px', borderRadius: '12px', background: 'rgba(251, 191, 36, 0.14)', color: '#fbbf24' }}>
+                                    Fatigue: {coachTags.fatigue}
+                                </span>
+                            )}
+                            {coachTags.breakthrough && (
+                                <span style={{ fontSize: '0.72rem', padding: '3px 9px', borderRadius: '12px', background: 'rgba(250, 204, 21, 0.18)', color: '#facc15', fontWeight: 600 }}>
+                                    🏆 {coachTags.breakthrough}
+                                </span>
+                            )}
+                        </div>
+                    )}
                 </div>
             )}
+
+            {/* ── Phase 5.2: Interactive AI Foil Coach Debrief Card ── */}
+            <div className="glass-panel" style={{ padding: '18px', marginBottom: '1.5rem', border: '1px solid rgba(56, 189, 248, 0.35)', background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.85), rgba(30, 41, 59, 0.75))' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: coachDebrief ? '14px' : '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Sparkles size={19} color="#38bdf8" />
+                        <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700 }}>
+                            AI Foil Coach Debrief
+                        </h3>
+                        {coachDebrief?.model && (
+                            <span style={{ fontSize: '0.68rem', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.25)', padding: '2px 8px', borderRadius: '999px' }}>
+                                {coachDebrief.model}
+                            </span>
+                        )}
+                    </div>
+
+                    <button
+                        type="button"
+                        onClick={handleGenerateCoachDebrief}
+                        disabled={coachLoading}
+                        className="btn-primary"
+                        style={{
+                            padding: '6px 14px',
+                            fontSize: '0.8rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            cursor: coachLoading ? 'wait' : 'pointer',
+                            opacity: coachLoading ? 0.7 : 1
+                        }}
+                    >
+                        <RefreshCw size={14} className={coachLoading ? 'spin' : ''} />
+                        {coachLoading
+                            ? 'Analyzing Session…'
+                            : coachDebrief
+                                ? 'Regenerate Coach Analysis'
+                                : 'Generate Coach Debrief'}
+                    </button>
+                </div>
+
+                {!coachDebrief ? (
+                    <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                        Synthesize your flight telemetry, gybe completion rate, heart-rate efficiency, and session notes into a personalized 3-point coaching debrief.
+                    </p>
+                ) : (
+                    <div>
+                        {coachDebrief.headline && (
+                            <div style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '12px' }}>
+                                {coachDebrief.headline}
+                            </div>
+                        )}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '12px' }}>
+                            <div style={{ background: 'rgba(0,0,0,0.28)', padding: '12px', borderRadius: '8px', borderLeft: '3px solid #4ade80' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.78rem', fontWeight: 700, color: '#4ade80', textTransform: 'uppercase', marginBottom: '6px' }}>
+                                    <CheckCircle2 size={14} /> What Went Well
+                                </div>
+                                <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                                    {coachDebrief.whatWentWell}
+                                </p>
+                            </div>
+
+                            <div style={{ background: 'rgba(0,0,0,0.28)', padding: '12px', borderRadius: '8px', borderLeft: '3px solid #38bdf8' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.78rem', fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase', marginBottom: '6px' }}>
+                                    <Sliders size={14} /> Tuning Recommendation
+                                </div>
+                                <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                                    {coachDebrief.tuningRecommendation}
+                                </p>
+                            </div>
+
+                            <div style={{ background: 'rgba(0,0,0,0.28)', padding: '12px', borderRadius: '8px', borderLeft: '3px solid #a78bfa' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.78rem', fontWeight: 700, color: '#a78bfa', textTransform: 'uppercase', marginBottom: '6px' }}>
+                                    <Target size={14} /> Technique Focus Next Session
+                                </div>
+                                <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                                    {coachDebrief.techniqueFocus}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
 
             {/* Foil Analysis Stats */}
             {analysis && (

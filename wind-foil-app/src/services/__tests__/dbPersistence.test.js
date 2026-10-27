@@ -5,6 +5,7 @@ import {
     prepareJournalEntryForFirestore,
     hydrateJournalEntry,
     normalizeEntryDate,
+    mergeItemLists,
 } from '../dbService';
 
 describe('Polyline Encoder & Decoder', () => {
@@ -218,5 +219,17 @@ describe('Firestore Sanitizer & Preparation', () => {
         expect(normalizeEntryDate({ date: { toDate: () => new Date('2026-02-22T08:06:00.000Z') } })).toBe('2026-02-22T08:06:00.000Z');
         expect(normalizeEntryDate({ date: { seconds: 1771747560 } })).toBe(new Date(1771747560 * 1000).toISOString());
         expect(normalizeEntryDate({ activityStats: { startTime: '2026-01-31T08:46:00.000Z' } })).toBe('2026-01-31T08:46:00.000Z');
+    });
+
+    it('merges remote and local locations without dropping items', () => {
+        const remote = [{ id: 'melville', name: 'Melville Waters', latitude: -32.01, longitude: 115.82 }];
+        const local = [
+            { id: 'melville', name: 'Melville Waters', latitude: -32.01, longitude: 115.82 },
+            { id: 'woodman', name: 'Woodman Point', latitude: -32.13, longitude: 115.76 }
+        ];
+
+        const merged = mergeItemLists(remote, local);
+        expect(merged.length).toBe(2);
+        expect(merged.find(l => l.id === 'woodman')).toBeDefined();
     });
 });

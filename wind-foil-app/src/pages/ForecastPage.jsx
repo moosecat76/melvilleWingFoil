@@ -15,10 +15,11 @@ import LocationManager from '../components/LocationManager';
 import BestTime from '../components/BestTime';
 import SimilarSessionsCard from '../components/SimilarSessionsCard';
 import { getJournalEntries } from '../services/journalService';
+import { getStoredGeminiKey, setStoredGeminiKey } from '../services/aiCoachService';
 import { exportData, importData } from '../services/storageService';
 import { initiateGoogleFitAuth, handleGoogleFitCallback, getGoogleFitUserAsync, disconnectGoogleFit } from '../services/googleFitService';
 import { saveUserGear } from '../services/dbService';
-import { Download, Upload, Database, Wifi } from 'lucide-react';
+import { Download, Upload, Database, Wifi, Sparkles } from 'lucide-react';
 
 const CustomArrowDot = (props) => {
     const { cx, cy, payload, index, getWindRating, idealWindDirection } = props;
@@ -51,6 +52,8 @@ const ForecastPage = () => {
 
     const [googleFitUser, setGoogleFitUser] = useState(null);
     const [gfitAuthLoading, setGfitAuthLoading] = useState(false);
+    const [geminiKeyInput, setGeminiKeyInput] = useState(() => getStoredGeminiKey());
+    const [showKeyEditor, setShowKeyEditor] = useState(false);
 
     const [data, setData] = useState([]);
     const [daily, setDaily] = useState(null);
@@ -396,6 +399,8 @@ const ForecastPage = () => {
                         unit={unit}
                         sessions={userSessions}
                         locationId={currentLocation.id}
+                        locationName={currentLocation.name}
+                        currentTide={current?.tide}
                     />
                 </div>
 
@@ -749,7 +754,7 @@ const ForecastPage = () => {
                     <h3 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <Database size={20} /> Data & Settings
                     </h3>
-                    <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '1rem' }}>
+                    <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '1rem', alignItems: 'center' }}>
                         <button onClick={handleExport} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <Download size={16} /> Export Data
                         </button>
@@ -767,7 +772,7 @@ const ForecastPage = () => {
                         </div>
 
                         {/* Google Health connect/disconnect */}
-                        <div style={{ width: '1px', background: 'var(--border-color)', margin: '0 10px' }}></div>
+                        <div style={{ width: '1px', height: '24px', background: 'var(--border-color)', margin: '0 6px' }}></div>
 
                         {gfitAuthLoading ? (
                             <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Connecting…</span>
@@ -803,6 +808,44 @@ const ForecastPage = () => {
                                 </button>
                             </div>
                         )}
+
+                        <div style={{ width: '1px', height: '24px', background: 'var(--border-color)', margin: '0 6px' }}></div>
+
+                        {/* Optional Gemini API Key for AI Foil Coach */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <button
+                                type="button"
+                                onClick={() => setShowKeyEditor(!showKeyEditor)}
+                                className="btn-secondary"
+                                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem' }}
+                            >
+                                <Sparkles size={15} color="#38bdf8" />
+                                {geminiKeyInput.trim() ? 'AI Coach Key Configured' : 'Configure AI Coach Key'}
+                            </button>
+                            {showKeyEditor && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <input
+                                        type="password"
+                                        value={geminiKeyInput}
+                                        onChange={e => setGeminiKeyInput(e.target.value)}
+                                        placeholder="GEMINI_API_KEY (optional if in .env)"
+                                        style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'white', fontSize: '0.8rem', minWidth: '220px' }}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setStoredGeminiKey(geminiKeyInput);
+                                            setShowKeyEditor(false);
+                                            showToast(geminiKeyInput.trim() ? 'Gemini API Key saved locally' : 'Cleared local Gemini API key', 'success');
+                                        }}
+                                        className="btn-primary"
+                                        style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+                                    >
+                                        Save
+                                    </button>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
 

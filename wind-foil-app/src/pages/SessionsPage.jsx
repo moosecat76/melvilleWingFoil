@@ -3,10 +3,11 @@ import { useLocation } from '../context/LocationContext';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { getJournalEntries, addJournalEntry, deleteJournalEntry, updateJournalEntry } from '../services/journalService';
-import { Book, Plus, Trash2, Edit2, Calendar, Wind, Clock, MapPin, X, ChevronRight, Search, Activity, FileText, CheckCircle2, RotateCcw } from 'lucide-react';
+import { Book, Plus, Trash2, Edit2, Calendar, Wind, Clock, MapPin, X, ChevronRight, Search, Activity, FileText, CheckCircle2, RotateCcw, Sparkles } from 'lucide-react';
 import { format } from 'date-fns';
 import { parseGpsFile } from '../services/tcxService';
 import { analyzeSession } from '../services/foilAnalysisService';
+import { extractSessionCoachTags } from '../services/aiCoachService';
 import { useNavigate } from 'react-router-dom';
 import { getWeatherForecast, getTideForecast, processChartData } from '../services/weatherService';
 import { fetchRecentSessions, fetchSessionTelemetry, relabelActivityType, sessionEmoji } from '../services/googleFitService';
@@ -188,16 +189,25 @@ const SessionsPage = () => {
         };
 
         try {
+            // 5.1 Structured Note Mining on Session Save (once per save)
+            if (entryData.notes?.trim() || entryData.foilAnalysis) {
+                try {
+                    entryData.coachTags = await extractSessionCoachTags(entryData, entryData.foilAnalysis);
+                } catch (tagErr) {
+                    console.warn('[SessionsPage] Coach tag extraction skipped:', tagErr);
+                }
+            }
+
             if (editId) {
                 const updated = await updateJournalEntry({ ...entryData, id: editId }, user?.uid);
                 if (updated) {
                     setEntries(entries.map(e => e.id === editId ? updated : e));
                 }
-                showToast('Session updated successfully!', 'success');
+                showToast('Session & AI Coach tags updated!', 'success');
             } else {
                 const added = await addJournalEntry(entryData, user?.uid);
                 setEntries([added, ...entries]);
-                showToast('Session logged successfully!', 'success');
+                showToast('Session logged & analyzed by AI Coach!', 'success');
             }
 
             // Reset
@@ -993,6 +1003,45 @@ const SessionsPage = () => {
                                             {entry.gearUsed && (
                                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
                                                     Gear: {entry.gearUsed}
+                                                </div>
+                                            )}
+
+                                            {/* AI Coach Tags (Phase 5.1) */}
+                                            {entry.coachTags && (
+                                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px', alignItems: 'center' }}>
+                                                    <span style={{
+                                                        fontSize: '0.68rem',
+                                                        fontWeight: 600,
+                                                        padding: '2px 7px',
+                                                        borderRadius: '10px',
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '3px',
+                                                        background: entry.coachTags.powerState === 'dialed'
+                                                            ? 'rgba(74, 222, 128, 0.14)'
+                                                            : entry.coachTags.powerState === 'underpowered'
+                                                                ? 'rgba(56, 189, 248, 0.14)'
+                                                                : 'rgba(251, 191, 36, 0.14)',
+                                                        color: entry.coachTags.powerState === 'dialed'
+                                                            ? '#4ade80'
+                                                            : entry.coachTags.powerState === 'underpowered'
+                                                                ? '#38bdf8'
+                                                                : '#fbbf24',
+                                                        border: '1px solid rgba(255,255,255,0.08)'
+                                                    }}>
+                                                        <Sparkles size={10} />
+                                                        {entry.coachTags.powerState.replace('_', ' ')}
+                                                    </span>
+                                                    {entry.coachTags.foilSentiment && entry.coachTags.foilSentiment !== 'balanced' && (
+                                                        <span style={{ fontSize: '0.68rem', padding: '2px 7px', borderRadius: '10px', background: 'rgba(167, 139, 250, 0.14)', color: '#a78bfa' }}>
+                                                            Foil: {entry.coachTags.foilSentiment.replace('_', ' ')}
+                                                        </span>
+                                                    )}
+                                                    {entry.coachTags.breakthrough && (
+                                                        <span style={{ fontSize: '0.68rem', padding: '2px 7px', borderRadius: '10px', background: 'rgba(250, 204, 21, 0.14)', color: '#facc15' }}>
+                                                            🏆 {entry.coachTags.breakthrough}
+                                                        </span>
+                                                    )}
                                                 </div>
                                             )}
                                         </div>

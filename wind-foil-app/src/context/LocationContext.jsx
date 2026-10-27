@@ -1,10 +1,11 @@
-import React, { createContext, useState, useEffect, useContext } from 'react';
+import React, { createContext, useState, useEffect, useContext, useRef } from 'react';
 import { useAuth } from './AuthContext';
 import {
     getUserLocations,
     saveUserLocations,
     getCurrentLocationId,
-    saveCurrentLocationId
+    saveCurrentLocationId,
+    mergeItemLists
 } from '../services/dbService';
 
 const LocationContext = createContext();
@@ -20,7 +21,7 @@ export const DEFAULT_LOCATION = {
 /**
  * Sanitizes a location object:
  * - Auto-swaps latitude and longitude if latitude is in (-180..180) outside [-90..90] and longitude is within [-90..90]
- * - Flags or repairs NaN coordinates
+ * - Restores default coordinates for Melville if corrupted
  */
 export const sanitizeLocation = (loc) => {
     if (!loc) return DEFAULT_LOCATION;
@@ -54,107 +55,157 @@ export const isValidCoordinates = (lat, lon) => {
     return !isNaN(numLat) && !isNaN(numLon) && numLat >= -90 && numLat <= 90 && numLon >= -180 && numLon <= 180;
 };
 
-export const LocationProvider = ({ children }) => {
-    const { user } = useAuth();
+const getStoredLocations = () => {
+    try {
+        const raw = localStorage.getItem('locations');
+        if (!raw) return [DEFAULT_LOCATION];
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed) || parsed.length === 0) return [DEFAULT_LOCATION];
+        const sanitized = parsed.map(sanitizeLocation);
+        const hasMelville = sanitized.some(l => l.id === 'melville');
+        return hasMelville ? sanitized : [DEFAULT_LOCATION, ...sanitized];
+    } catch {
+        return [DEFAULT_LOCATION];
+    }
+};
 
-    const [locations, setLocations] = useState(() => {
-        try {
-            const saved = localStorage.getItem('locations');
-            let parsed = saved ? JSON.parse(saved) : [DEFAULT_LOCATION];
-            if (!Array.isArray(parsed) || parsed.length === 0) parsed = [DEFAULT_LOCATION];
-            return parsed.map(sanitizeLocation);
-        } catch {
-            return [DEFAULT_LOCATION];
-        }
-    });
-
-    const [currentLocation, setCurrentLocation] = useState(() => {
-        try {
-            const savedId = localStorage.getItem('currentLocationId');
-            const savedList = JSON.parse(localStorage.getItem('locations') || '[]').map(sanitizeLocation);
-            if (savedId) {
-                const found = savedList.find(l => l.id === savedId);
-                if (found && isValidCoordinates(found.latitude, found.longitude)) {
-                    return found;
-                }
+const getStoredCurrentLocation = (locsList) => {
+    try {
+        const savedId = localStorage.getItem('currentLocationId');
+        if (savedId) {
+            const found = locsList.find(l => l.id === savedId);
+            if (found && isValidCoordinates(found.latitude, found.longitude)) {
+                return found;
             }
-            const validFirst = savedList.find(l => isValidCoordinates(l.latitude, l.longitude));
-            return validFirst || DEFAULT_LOCATION;
-        } catch {
-            return DEFAULT_LOCATION;
         }
+        const validFirst = locsList.find(l => isValidCoordinates(l.latitude, l.longitude));
+        return validFirst || DEFAULT_LOCATION;
+    } catch {
+        return DEFAULT_LOCATION;
+    }
+};
+
+export const LocationProvider = ({ children }) => {
+    const { user, loading: authLoading } = useAuth();
+    const [locations, setLocations] = useState(() => getStoredLocations());
+    const [currentLocation, setCurrentLocation] = useState(() => {
+        const initialLocs = getStoredLocations();
+        return getStoredCurrentLocation(initialLocs);
     });
 
+    // Track whether initial cloud sync has completed for this user session
+    const syncCompletedForUid = useRef(null);
+
+    // Synchronize cloud + local storage when auth state is resolved
     useEffect(() => {
-        const fetchRemote = async () => {
-            if (user?.uid) {
-                const remoteLocations = await getUserLocations(user.uid);
-                const sanitizedRemote = (remoteLocations && remoteLocations.length > 0)
-                    ? remoteLocations.map(sanitizeLocation)
-                    : null;
-                if (sanitizedRemote) {
-                    setLocations(sanitizedRemote);
-                }
-                const remoteCurrentLocationId = await getCurrentLocationId(user.uid);
-                if (remoteCurrentLocationId) {
-                    const pool = sanitizedRemote || locations;
-                    const found = pool.find(l => l.id === remoteCurrentLocationId);
-                    if (found) setCurrentLocation(sanitizeLocation(found));
+        if (authLoading) return;
+
+        const syncLocations = async () => {
+            const currentUid = user?.uid || null;
+
+            if (currentUid) {
+                try {
+                    const [remoteLocations, remoteCurrentId] = await Promise.all([
+                        getUserLocations(currentUid),
+                        getCurrentLocationId(currentUid)
+                    ]);
+
+                    const localLocs = getStoredLocations();
+                    // Merge remote + local so no location from either source is lost
+                    const merged = mergeItemLists(remoteLocations || [], localLocs).map(sanitizeLocation);
+                    const hasMelville = merged.some(l => l.id === 'melville');
+                    const finalList = hasMelville ? merged : [DEFAULT_LOCATION, ...merged];
+
+                    // Determine active location
+                    const targetId = remoteCurrentId || localStorage.getItem('currentLocationId') || 'melville';
+                    const activeLoc = finalList.find(l => l.id === targetId && isValidCoordinates(l.latitude, l.longitude))
+                        || finalList.find(l => isValidCoordinates(l.latitude, l.longitude))
+                        || DEFAULT_LOCATION;
+
+                    // Update local storage
+                    localStorage.setItem('locations', JSON.stringify(finalList));
+                    localStorage.setItem('currentLocationId', activeLoc.id);
+
+                    // Update cloud database
+                    await Promise.all([
+                        saveUserLocations(currentUid, finalList),
+                        saveCurrentLocationId(currentUid, activeLoc.id)
+                    ]);
+
+                    setLocations(finalList);
+                    setCurrentLocation(activeLoc);
+                    syncCompletedForUid.current = currentUid;
+                } catch (err) {
+                    console.warn('[LocationContext] Cloud sync failed, using local locations:', err);
                 }
             } else {
-                const saved = localStorage.getItem('locations');
-                if (saved) {
-                    try {
-                        const parsed = JSON.parse(saved).map(sanitizeLocation);
-                        setLocations(parsed);
-                        const savedId = localStorage.getItem('currentLocationId');
-                        if (savedId) {
-                            const found = parsed.find(l => l.id === savedId);
-                            if (found) setCurrentLocation(found);
-                        }
-                    } catch {
-                        setLocations([DEFAULT_LOCATION]);
-                        setCurrentLocation(DEFAULT_LOCATION);
-                    }
-                }
+                // Logged out: ensure local state matches localStorage
+                const localLocs = getStoredLocations();
+                const activeLoc = getStoredCurrentLocation(localLocs);
+                setLocations(localLocs);
+                setCurrentLocation(activeLoc);
+                syncCompletedForUid.current = null;
             }
         };
-        fetchRemote();
-    }, [user?.uid]);
 
-    useEffect(() => {
-        if (user?.uid) {
-            saveUserLocations(user.uid, locations);
-        } else {
-            localStorage.setItem('locations', JSON.stringify(locations));
-        }
-    }, [locations, user?.uid]);
+        syncLocations();
+    }, [user?.uid, authLoading]);
 
-    useEffect(() => {
-        if (user?.uid) {
-            saveCurrentLocationId(user.uid, currentLocation.id);
-        } else {
-            localStorage.setItem('currentLocationId', currentLocation.id);
+    // Helper to persist both to localStorage and Firestore
+    const persistLocations = (newLocations, newCurrentLoc = null) => {
+        const hasMelville = newLocations.some(l => l.id === 'melville');
+        const safeList = hasMelville ? newLocations : [DEFAULT_LOCATION, ...newLocations];
+
+        // 1. Always update localStorage immediately
+        try {
+            localStorage.setItem('locations', JSON.stringify(safeList));
+            if (newCurrentLoc) {
+                localStorage.setItem('currentLocationId', newCurrentLoc.id);
+            }
+        } catch (e) {
+            console.warn('[LocationContext] Failed to write localStorage:', e);
         }
-    }, [currentLocation, user?.uid]);
+
+        // 2. If logged in, update Firestore asynchronously
+        if (user?.uid) {
+            saveUserLocations(user.uid, safeList).catch(err => {
+                console.error('[LocationContext] Failed to save locations to Firestore:', err);
+            });
+            if (newCurrentLoc) {
+                saveCurrentLocationId(user.uid, newCurrentLoc.id).catch(err => {
+                    console.error('[LocationContext] Failed to save current location to Firestore:', err);
+                });
+            }
+        }
+    };
 
     const addLocation = (name, lat, lon, idealMin = 0, idealMax = 360) => {
         const newLoc = sanitizeLocation({
             id: Date.now().toString(),
-            name,
+            name: name.trim(),
             latitude: parseFloat(lat),
             longitude: parseFloat(lon),
             idealWindDirection: { min: parseFloat(idealMin), max: parseFloat(idealMax) }
         });
-        setLocations(prev => [...prev, newLoc]);
+
+        const updatedList = [...locations, newLoc];
+        setLocations(updatedList);
         setCurrentLocation(newLoc);
+        persistLocations(updatedList, newLoc);
         return newLoc;
     };
 
     const switchLocation = (id) => {
-        const loc = locations.find(l => l.id === id);
-        if (loc) {
-            setCurrentLocation(sanitizeLocation(loc));
+        const found = locations.find(l => l.id === id);
+        if (found) {
+            const safe = sanitizeLocation(found);
+            setCurrentLocation(safe);
+            try {
+                localStorage.setItem('currentLocationId', safe.id);
+            } catch {}
+            if (user?.uid) {
+                saveCurrentLocationId(user.uid, safe.id).catch(() => {});
+            }
         }
     };
 
@@ -162,40 +213,52 @@ export const LocationProvider = ({ children }) => {
         if (id === 'melville') return;
         const remaining = locations.filter(l => l.id !== id);
         const safeRemaining = remaining.length > 0 ? remaining : [DEFAULT_LOCATION];
-        setLocations(safeRemaining);
+
+        let nextCurrent = currentLocation;
         if (currentLocation.id === id) {
-            setCurrentLocation(safeRemaining[0]);
+            nextCurrent = safeRemaining[0];
+            setCurrentLocation(nextCurrent);
         }
+
+        setLocations(safeRemaining);
+        persistLocations(safeRemaining, nextCurrent);
     };
 
     const updateLocation = (id, updates) => {
-        setLocations(prev => prev.map(loc => {
+        let updatedActive = null;
+        const updatedList = locations.map(loc => {
             if (loc.id === id) {
                 const updated = sanitizeLocation({
                     ...loc,
                     ...updates,
                     idealWindDirection: {
-                        min: parseFloat(updates.idealMin !== undefined ? updates.idealMin : loc.idealWindDirection.min),
-                        max: parseFloat(updates.idealMax !== undefined ? updates.idealMax : loc.idealWindDirection.max)
+                        min: parseFloat(updates.idealMin !== undefined ? updates.idealMin : loc.idealWindDirection?.min ?? 0),
+                        max: parseFloat(updates.idealMax !== undefined ? updates.idealMax : loc.idealWindDirection?.max ?? 360)
                     }
                 });
-
                 if (currentLocation.id === id) {
-                    setCurrentLocation(updated);
+                    updatedActive = updated;
                 }
                 return updated;
             }
             return loc;
-        }));
+        });
+
+        setLocations(updatedList);
+        if (updatedActive) {
+            setCurrentLocation(updatedActive);
+        }
+        persistLocations(updatedList, updatedActive || currentLocation);
     };
 
     const resetToDefaultLocation = () => {
-        setLocations(prev => {
-            const hasMelville = prev.some(l => l.id === 'melville');
-            const cleaned = prev.map(l => l.id === 'melville' ? DEFAULT_LOCATION : sanitizeLocation(l));
-            return hasMelville ? cleaned : [DEFAULT_LOCATION, ...cleaned];
-        });
+        const cleaned = locations.map(l => l.id === 'melville' ? DEFAULT_LOCATION : sanitizeLocation(l));
+        const hasMelville = cleaned.some(l => l.id === 'melville');
+        const safeList = hasMelville ? cleaned : [DEFAULT_LOCATION, ...cleaned];
+
+        setLocations(safeList);
         setCurrentLocation(DEFAULT_LOCATION);
+        persistLocations(safeList, DEFAULT_LOCATION);
     };
 
     return (

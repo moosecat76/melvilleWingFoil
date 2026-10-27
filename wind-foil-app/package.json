@@ -12,6 +12,7 @@
     "test": "vitest"
   },
   "dependencies": {
+    "@google/genai": "^2.31.0",
     "@vercel/analytics": "^2.0.1",
     "axios": "^1.13.2",
     "date-fns": "^4.1.0",
