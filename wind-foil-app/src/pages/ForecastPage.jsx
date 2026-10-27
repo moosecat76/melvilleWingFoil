@@ -184,23 +184,76 @@ const ForecastPage = () => {
     }, [data, unit, oneDayAgo]);
 
     const nightBands = useMemo(() => {
-        const bands = [];
-        if (!daily || !Array.isArray(daily.time) || !Array.isArray(daily.sunrise) || !Array.isArray(daily.sunset)) {
-            return bands;
-        }
+        if (!chartData || chartData.length === 0) return [];
 
-        for (let i = 0; i < daily.time.length; i++) {
-            const sunsetTime = new Date(daily.sunset[i]).getTime();
-            if (i < daily.time.length - 1 && daily.sunrise[i + 1]) {
-                const nextSunriseTime = new Date(daily.sunrise[i + 1]).getTime();
-                bands.push({ start: sunsetTime, end: nextSunriseTime });
+        const times = chartData.map(d => d.time);
+        const minTime = times[0];
+        const maxTime = times[times.length - 1];
+
+        const findClosestTime = (targetMs) => {
+            let closest = times[0];
+            let minDiff = Math.abs(times[0] - targetMs);
+            for (let i = 1; i < times.length; i++) {
+                const diff = Math.abs(times[i] - targetMs);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closest = times[i];
+                }
+            }
+            return closest;
+        };
+
+        const bands = [];
+
+        if (daily && Array.isArray(daily.time) && Array.isArray(daily.sunrise) && Array.isArray(daily.sunset)) {
+            for (let i = 0; i < daily.time.length; i++) {
+                const sunsetMs = new Date(daily.sunset[i]).getTime();
+                const nextSunriseMs = (i < daily.time.length - 1 && daily.sunrise[i + 1])
+                    ? new Date(daily.sunrise[i + 1]).getTime()
+                    : null;
+
+                if (nextSunriseMs) {
+                    const start = findClosestTime(sunsetMs);
+                    const end = findClosestTime(nextSunriseMs);
+                    if (start < end && end >= minTime && start <= maxTime) {
+                        bands.push({
+                            start: Math.max(start, minTime),
+                            end: Math.min(end, maxTime)
+                        });
+                    }
+                }
+            }
+
+            // Check day 0 pre-sunrise
+            if (daily.sunrise[0]) {
+                const firstSunrise = findClosestTime(new Date(daily.sunrise[0]).getTime());
+                if (minTime < firstSunrise) {
+                    bands.unshift({ start: minTime, end: firstSunrise });
+                }
             }
         }
 
-        if (daily.sunrise[0] && chartData.length > 0) {
-            const firstSunrise = new Date(daily.sunrise[0]).getTime();
-            if (chartData[0].time < firstSunrise) {
-                bands.unshift({ start: chartData[0].time, end: firstSunrise });
+        // Fallback: if daily is missing or produced no bands in range, compute by hour (19:00 -> 06:00)
+        if (bands.length === 0) {
+            let currentBand = null;
+            for (const d of chartData) {
+                const h = d.rawDate.getHours();
+                const isNight = (h >= 19 || h < 6);
+                if (isNight) {
+                    if (!currentBand) {
+                        currentBand = { start: d.time, end: d.time };
+                    } else {
+                        currentBand.end = d.time;
+                    }
+                } else {
+                    if (currentBand && currentBand.start !== currentBand.end) {
+                        bands.push(currentBand);
+                    }
+                    currentBand = null;
+                }
+            }
+            if (currentBand && currentBand.start !== currentBand.end) {
+                bands.push(currentBand);
             }
         }
 
@@ -512,7 +565,9 @@ const ForecastPage = () => {
                                     x2={band.end}
                                     yAxisId="wind"
                                     fill="#000000"
-                                    fillOpacity={0.28}
+                                    fillOpacity={0.45}
+                                    strokeOpacity={0}
+                                    ifFront={false}
                                 />
                             ))}
 
