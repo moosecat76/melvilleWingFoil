@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { suggestBestSessions } from '../services/recommendationService';
+import { suggestBestSessions, isDirectionInSector } from '../services/recommendationService';
 import { BadgeCheck, Clock, Wind } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -41,8 +41,7 @@ const BestTime = ({ forecastHourly, userGear, idealWindDirection, daily, unit = 
 
                     // Check if direction is ideal for UI badge
                     const isIdeal = idealWindDirection &&
-                        block.avgDirection >= idealWindDirection.min &&
-                        block.avgDirection <= idealWindDirection.max;
+                        isDirectionInSector(block.avgDirection, idealWindDirection.min, idealWindDirection.max);
 
                     return (
                         <div key={idx} style={{

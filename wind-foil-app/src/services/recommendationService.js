@@ -1,11 +1,28 @@
 
+/**
+ * Determines whether a given wind direction falls inside an ideal sector,
+ * correctly handling wrap-around northerly sectors (e.g. 315° to 45°).
+ */
+export const isDirectionInSector = (direction, min, max) => {
+    if (direction == null || min == null || max == null) return false;
+    const normDir = ((Number(direction) % 360) + 360) % 360;
+    const normMin = ((Number(min) % 360) + 360) % 360;
+    const normMax = ((Number(max) % 360) + 360) % 360;
+
+    if (normMin <= normMax) {
+        return normDir >= normMin && normDir <= normMax;
+    }
+    // Wrap around 360° (e.g. min: 315, max: 45)
+    return normDir >= normMin || normDir <= normMax;
+};
+
 export const getWindRating = (speedKmh, direction, idealRange) => {
     // Default range if not provided or null
     const safeIdealRange = idealRange || { min: 135, max: 270 };
 
     if (speedKmh == null) return { label: 'N/A', rating: 0, color: 'var(--text-secondary)' };
 
-    const isIdealDirection = direction >= safeIdealRange.min && direction <= safeIdealRange.max;
+    const isIdealDirection = isDirectionInSector(direction, safeIdealRange.min, safeIdealRange.max);
 
     if (speedKmh < 15) {
         return { label: 'Too Light', rating: 1, color: 'var(--text-secondary)' };
