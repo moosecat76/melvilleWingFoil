@@ -200,7 +200,7 @@ export default async function handler(req, res) {
             model = 'gemini-3.8-flash';
             schema = DEBRIEF_JSON_SCHEMA;
             systemInstruction =
-                'You are an elite Wing & Wind Foil Coach. ' +
+                'You are an elite Wing Foil Coach. ' +
                 'Analyze the rider session summary (wind, gusts, gear used, flight stats, gybe completion, takeoff conversion, heart-rate efficiency, and rider notes). ' +
                 'Provide a sharp, encouraging, highly specific 3-part debrief: ' +
                 '1) What Went Well (cite exact metrics from their session), ' +
@@ -210,7 +210,7 @@ export default async function handler(req, res) {
             model = 'gemini-3.5-flash-lite';
             schema = GAME_PLAN_JSON_SCHEMA;
             systemInstruction =
-                'You are an elite Wing & Wind Foil Coach giving a concise dockside pre-session briefing. ' +
+                'You are an elite Wing Foil Coach giving a concise dockside pre-session briefing. ' +
                 'Synthesize the forecasted wind speed, gust spread, tide level, recommended quiver setup, and the rider past sessions at this spot into a 2-sentence briefing, a gear rigging tip, and a key focus.';
         } else {
             return res.status(400).json({ error: `Unsupported mode: ${mode}` });
