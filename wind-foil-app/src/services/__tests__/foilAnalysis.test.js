@@ -80,6 +80,32 @@ describe('foilAnalysisService', () => {
         expect(result.stats.totalRuns).toBe(2);
     });
 
+    it('rejects drifting barometric altitude and ignores slow sailing surges (2026-10-31 calibration)', () => {
+        const n = 200;
+        const time = Array.from({ length: n }, (_, i) => i);
+        const velocity = new Array(n).fill(0.6); // walking / drifting
+        // Real flight: ~4.5 m/s (8.7 kts) for 60s
+        for (let t = 20; t < 80; t++) velocity[t] = 4.5;
+        // Slow sailing in on knees: ~1.5 m/s with a short 2.3 m/s surge (should NOT be foil)
+        for (let t = 100; t < 180; t++) velocity[t] = 1.5;
+        for (let t = 130; t < 140; t++) velocity[t] = 2.3;
+        // Altitude drifts ~15 m across the session (barometric noise on the water)
+        const altitude = time.map(t => 7 - t * 0.075);
+
+        const result = analyzeSession({
+            time: { data: time },
+            velocity_smooth: { data: velocity },
+            altitude: { data: altitude },
+        });
+
+        expect(result.mode).toBe('speed');
+        expect(result.altitudeRejected).toBe(true);
+        expect(result.stats.numberOfFlights).toBe(1);
+        expect(result.foilSegments[0].startTimeSec).toBeGreaterThanOrEqual(19);
+        expect(result.foilSegments[0].startTimeSec).toBeLessThanOrEqual(22);
+        expect(result.pointStates.slice(100, 180).every(s => s !== 'foiling')).toBe(true);
+    });
+
     it('detects foiling gybes vs wet gybes and computes tack symmetry from GPS latlng stream', () => {
         // 50 seconds:
         // t=0..4: displacement (0.8 m/s)

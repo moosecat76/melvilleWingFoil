@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea, ReferenceLine } from 'recharts';
 import { usePreferences } from '../context/PreferencesContext';
 
-const CustomTooltip = ({ active, payload, hasAltitude, speedUnit, speedMult }) => {
+const CustomTooltip = ({ active, payload, hasAltitude, speedUnit, speedMult, isRelative, altLabel }) => {
     if (active && payload && payload.length) {
         const data = payload[0].payload;
         const displaySpeed = (data.speed * speedMult).toFixed(1);
@@ -14,7 +14,12 @@ const CustomTooltip = ({ active, payload, hasAltitude, speedUnit, speedMult }) =
                     <span style={{ fontSize: '10px', color: '#94a3b8' }}>({data.speed.toFixed(1)} m/s)</span>
                 </p>
                 {hasAltitude && (
-                    <p style={{ margin: '0 0 2px 0' }}>Altitude: <strong style={{ color: '#82ca9d' }}>{data.altitude.toFixed(2)} m</strong></p>
+                    <p style={{ margin: '0 0 2px 0' }}>
+                        {altLabel}: <strong style={{ color: '#82ca9d' }}>{isRelative && data.altitude >= 0 ? '+' : ''}{data.altitude.toFixed(2)} m</strong>
+                        {isRelative && typeof data.rawAltitude === 'number' && (
+                            <span style={{ fontSize: '10px', color: '#94a3b8' }}> (raw {data.rawAltitude.toFixed(1)} m)</span>
+                        )}
+                    </p>
                 )}
                 <p style={{ margin: 0 }}>State: <strong style={{ color: data.state === 'beach' ? '#f87171' : data.state === 'foiling' ? '#4ade80' : '#fbbf24' }}>{data.state.charAt(0).toUpperCase() + data.state.slice(1)}</strong></p>
             </div>
@@ -23,8 +28,19 @@ const CustomTooltip = ({ active, payload, hasAltitude, speedUnit, speedMult }) =
     return null;
 };
 
+const toggleBtnStyle = (active) => ({
+    background: active ? 'rgba(130, 202, 157, 0.2)' : 'transparent',
+    border: '1px solid ' + (active ? '#82ca9d' : 'rgba(255,255,255,0.15)'),
+    color: active ? '#82ca9d' : 'var(--text-secondary)',
+    borderRadius: '10px',
+    padding: '2px 8px',
+    fontSize: '0.72rem',
+    cursor: 'pointer'
+});
+
 const FoilAnalysisChart = ({ analysisData, onHover, selectedSegment = null, onSelectSegment = null, unit: propUnit }) => {
     const preferences = usePreferences();
+    const [altView, setAltView] = useState('relative'); // 'relative' (drift/tide-corrected) | 'raw'
     const activeUnit = propUnit || preferences.unit || 'knots';
     const speedMult = activeUnit === 'kmh' ? 3.6 : 1.94384;
     const speedUnit = activeUnit === 'kmh' ? 'km/h' : 'kts';
@@ -32,10 +48,20 @@ const FoilAnalysisChart = ({ analysisData, onHover, selectedSegment = null, onSe
     if (!analysisData || !analysisData.data) return null;
 
     const { data, foilSegments = [], baselineAltitude, dynamicBaseline, pointStates, mode, adaptiveThreshold } = analysisData;
-    const { velocity, altitude, time } = data;
+    const { velocity, altitude, time, altitudeNormalized } = data;
     if (!Array.isArray(time) || !Array.isArray(velocity) || time.length === 0 || velocity.length === 0) {
         return null;
     }
+
+    const isAltitudeMode = mode === 'altitude';
+    const hasRawAltitude = Array.isArray(altitude) && altitude.length === time.length &&
+        (Math.max(...altitude) - Math.min(...altitude)) > 0.1;
+    const hasNormalized = Array.isArray(altitudeNormalized) && altitudeNormalized.length === time.length;
+    // Always show altitude when it was recorded, even if detection used speed only
+    const hasAltitude = hasRawAltitude;
+    const isRelative = hasNormalized && altView === 'relative';
+    const altSeries = isRelative ? altitudeNormalized : altitude;
+    const altLabel = isRelative ? 'Rel. altitude' : 'Altitude';
 
     const targetPoints = 500;
     const samplingRate = Math.max(1, Math.ceil(time.length / targetPoints));
@@ -57,16 +83,17 @@ const FoilAnalysisChart = ({ analysisData, onHover, selectedSegment = null, onSe
             timeMin: (time[bestIdx] / 60).toFixed(2),
             speed: velocity[bestIdx],
             displaySpeed: Number((velocity[bestIdx] * speedMult).toFixed(1)),
-            altitude: altitude ? altitude[bestIdx] : 0,
-            baseline: dynamicBaseline ? dynamicBaseline[bestIdx] : baselineAltitude,
+            altitude: hasAltitude ? altSeries[bestIdx] : 0,
+            rawAltitude: hasAltitude ? altitude[bestIdx] : null,
+            // Altitude baseline only makes sense when detection used altitude and we show raw values
+            baseline: (isAltitudeMode && !isRelative) ? (dynamicBaseline ? dynamicBaseline[bestIdx] : baselineAltitude) : null,
             state: pointStates ? pointStates[bestIdx] : 'sailing'
         });
     }
 
-    const minAlt = altitude && altitude.length > 0 ? Math.min(...altitude) : 0;
-    const maxAlt = altitude && altitude.length > 0 ? Math.max(...altitude) : 0;
-    const hasAltitude = mode ? mode === 'altitude' : (maxAlt - minAlt) > 0.1;
-    const altPadding = hasAltitude ? (maxAlt - minAlt) * 0.1 : 1;
+    const minAlt = hasAltitude ? Math.min(...altSeries) : 0;
+    const maxAlt = hasAltitude ? Math.max(...altSeries) : 0;
+    const altPadding = hasAltitude ? Math.max(0.2, (maxAlt - minAlt) * 0.1) : 1;
     const foilLineY = adaptiveThreshold || 1.95;
     const foilLineConverted = Number((foilLineY * speedMult).toFixed(1));
 
@@ -109,11 +136,19 @@ const FoilAnalysisChart = ({ analysisData, onHover, selectedSegment = null, onSe
                         </button>
                     )}
                 </div>
-                {!hasAltitude && (
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: '10px' }}>
-                        Adaptive foil threshold: ~{foilLineConverted} {speedUnit} ({foilLineY.toFixed(1)} m/s)
-                    </span>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    {hasAltitude && hasNormalized && (
+                        <div style={{ display: 'flex', gap: '4px' }} title="Relative altitude removes slow drift from tide, air pressure and sensor warm-up">
+                            <button type="button" style={toggleBtnStyle(altView === 'relative')} onClick={() => setAltView('relative')}>Relative alt</button>
+                            <button type="button" style={toggleBtnStyle(altView === 'raw')} onClick={() => setAltView('raw')}>Raw alt</button>
+                        </div>
+                    )}
+                    {!isAltitudeMode && (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: '10px' }}>
+                            Adaptive foil threshold: ~{foilLineConverted} {speedUnit} ({foilLineY.toFixed(1)} m/s)
+                        </span>
+                    )}
+                </div>
             </div>
             <ResponsiveContainer width="100%" height="90%">
                 <ComposedChart
@@ -153,21 +188,25 @@ const FoilAnalysisChart = ({ analysisData, onHover, selectedSegment = null, onSe
                         <YAxis
                             yAxisId="altitude"
                             orientation="right"
-                            reversed={true}
-                            domain={[minAlt - altPadding, maxAlt + altPadding]}
-                            label={{ value: 'Altitude (m)', angle: 90, position: 'insideRight', fill: '#82ca9d' }}
+                            reversed={isAltitudeMode && !isRelative}
+                            domain={[Number((minAlt - altPadding).toFixed(1)), Number((maxAlt + altPadding).toFixed(1))]}
+                            label={{ value: isRelative ? 'Rel. altitude (m)' : 'Altitude (m)', angle: 90, position: 'insideRight', fill: '#82ca9d' }}
                             stroke="#82ca9d"
                             fontSize={12}
                         />
                     )}
 
-                    <Tooltip content={<CustomTooltip hasAltitude={hasAltitude} speedUnit={speedUnit} speedMult={speedMult} />} />
+                    <Tooltip content={<CustomTooltip hasAltitude={hasAltitude} speedUnit={speedUnit} speedMult={speedMult} isRelative={isRelative} altLabel={altLabel} />} />
 
-                    {hasAltitude && (
+                    {hasAltitude && isAltitudeMode && !isRelative && (
                         <Line yAxisId="altitude" type="monotone" dataKey="baseline" stroke="#82ca9d" strokeDasharray="5 5" dot={false} strokeWidth={1} name="Base" />
                     )}
 
-                    {!hasAltitude && (
+                    {hasAltitude && isRelative && (
+                        <ReferenceLine yAxisId="altitude" y={0} stroke="#82ca9d" strokeDasharray="5 5" strokeOpacity={0.4} />
+                    )}
+
+                    {!isAltitudeMode && (
                         <ReferenceLine yAxisId="speed" y={foilLineConverted} stroke="#4ade80" strokeDasharray="4 4" strokeOpacity={0.6} />
                     )}
 
@@ -208,6 +247,7 @@ const FoilAnalysisChart = ({ analysisData, onHover, selectedSegment = null, onSe
                             fillOpacity={0.1}
                             dot={false}
                             name="Altitude"
+                            baseValue={isRelative ? 0 : 'dataMin'}
                         />
                     )}
 

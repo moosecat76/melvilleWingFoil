@@ -528,6 +528,37 @@ const _analyzeEfficiency = (velocityStream, timeStream, heartrateStream, pointSt
     };
 };
 
+/**
+ * Normalises a drifting altitude channel into a relative altitude.
+ * Watch altitude on the water drifts with tide, air pressure and sensor warm-up. Subtracting a
+ * slow rolling median (±windowSec) removes that drift so only short-term changes remain
+ * (e.g. swell, pumping, wave riding). Returns null if there is no usable altitude.
+ */
+const _normalizeAltitude = (altitudeStream, timeStream, windowSec = 90) => {
+    const n = timeStream.length;
+    if (!Array.isArray(altitudeStream) || altitudeStream.length !== n || n === 0) return null;
+    const out = new Array(n);
+    let lo = 0;
+    let hi = 0;
+    for (let i = 0; i < n; i++) {
+        while (lo < i && timeStream[i] - timeStream[lo] > windowSec) lo++;
+        while (hi < n - 1 && timeStream[hi + 1] - timeStream[i] <= windowSec) hi++;
+        const win = [];
+        for (let k = lo; k <= hi; k++) {
+            const a = altitudeStream[k];
+            if (typeof a === 'number' && !isNaN(a)) win.push(a);
+        }
+        const a = altitudeStream[i];
+        if (win.length === 0 || typeof a !== 'number' || isNaN(a)) {
+            out[i] = 0;
+            continue;
+        }
+        win.sort((x, y) => x - y);
+        out[i] = Number((a - _percentile(win, 0.5)).toFixed(2));
+    }
+    return out;
+};
+
 export const analyzeSession = (streams, options = {}) => {
     if (!streams) return null;
 
@@ -560,7 +591,17 @@ export const analyzeSession = (streams, options = {}) => {
     const hasVelocity = velocityStream.some(v => typeof v === 'number' && v > 0);
     const nonZeroAlts = altitudeStream.filter(a => typeof a === 'number' && !isNaN(a) && a !== 0);
     const altRange = nonZeroAlts.length > 1 ? (Math.max(...nonZeroAlts) - Math.min(...nonZeroAlts)) : 0;
-    const hasValidAltitude = nonZeroAlts.length > 0 && altRange > 0.1;
+    // Barometric/GPS altitude on the water drifts badly (often 10-20 m over a session, e.g. the
+    // 2026-10-31 Melville session swung from +7.7 m to -13.5 m). Real foil ride height is < 1 m,
+    // so a robust altitude spread beyond a few metres means the altitude channel is noise and
+    // must NOT be used for lift detection — fall back to the adaptive speed model instead.
+    const sortedAlts = [...nonZeroAlts].sort((a, b) => a - b);
+    const robustAltSpread = sortedAlts.length > 1
+        ? _percentile(sortedAlts, 0.95) - _percentile(sortedAlts, 0.05)
+        : 0;
+    const MAX_PLAUSIBLE_WATER_ALT_SPREAD = 4.0;
+    const altitudeUnreliable = robustAltSpread > MAX_PLAUSIBLE_WATER_ALT_SPREAD;
+    const hasValidAltitude = nonZeroAlts.length > 0 && altRange > 0.1 && !altitudeUnreliable;
 
     if (!hasVelocity && !hasValidAltitude) {
         return null;
@@ -755,6 +796,27 @@ export const analyzeSession = (streams, options = {}) => {
         foilSegments.push(currentSegment);
     }
 
+    // Speed mode: reject short "surges" that never reach real flight speed.
+    // Calibrated against rider-labelled data (2026-10-31): genuine flights peak at 4.5-5.2 m/s
+    // (9-10 kts) while displacement sailing / sailing in on knees tops out ~2.0-2.5 m/s (4-5 kts).
+    if (!hasValidAltitude && adaptiveProfile && foilSegments.length > 0 && (adaptiveProfile.p95 || 0) >= 3.5) {
+        const minFlightPeak = Math.max(2.8, adaptiveProfile.p95 * 0.6);
+        for (let s = foilSegments.length - 1; s >= 0; s--) {
+            const seg = foilSegments[s];
+            let peak = 0;
+            for (let k = seg.start; k <= seg.end; k++) {
+                const v = velocityStream[k];
+                if (v > peak && v < 30) peak = v;
+            }
+            if (peak < minFlightPeak) {
+                for (let k = seg.start; k <= seg.end; k++) {
+                    if (pointStates[k] === 'foiling') pointStates[k] = 'sailing';
+                }
+                foilSegments.splice(s, 1);
+            }
+        }
+    }
+
     // Merge micro-dips (< 3 seconds off-foil where speed stayed near stall threshold, e.g. mid-gybe)
     const rawMergedSegments = [];
     for (const seg of foilSegments) {
@@ -893,6 +955,7 @@ export const analyzeSession = (streams, options = {}) => {
 
     return {
         mode: hasValidAltitude ? 'altitude' : 'speed',
+        altitudeRejected: altitudeUnreliable,
         adaptiveThreshold: adaptiveProfile?.foilEntrySpeed || null,
         adaptiveProfile,
         baselineAltitude: dynamicBaseline[0] || 0,
@@ -920,6 +983,10 @@ export const analyzeSession = (streams, options = {}) => {
         data: {
             velocity: velocityStream,
             altitude: altitudeStream,
+            // Drift/tide-corrected altitude for display (null when no altitude was recorded)
+            altitudeNormalized: (hasAltitudeArray && nonZeroAlts.length > 0 && altRange > 0.1)
+                ? _normalizeAltitude(altitudeStream, timeStream)
+                : null,
             time: timeStream
         }
     };
