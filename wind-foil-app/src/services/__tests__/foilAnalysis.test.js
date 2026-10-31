@@ -207,4 +207,48 @@ describe('foilAnalysisService', () => {
         expect(parseFloat(result.stats.movingTimeMinutes)).toBeGreaterThan(0.7);
         expect(parseFloat(result.stats.restTimeMinutes)).toBeGreaterThan(1.0);
     });
+
+    it('rejects 4-knot taxiing as foiling on large board/foil setups', () => {
+        // 60 seconds session where rider reaches 2.05 m/s (~4 kts) on a large board + 1850cm² foil
+        const n = 60;
+        const time = Array.from({ length: n }, (_, i) => i);
+        const velocity = new Array(n).fill(1.2); // taxiing
+        for (let t = 20; t <= 35; t++) velocity[t] = 2.05; // 4 knots surge
+
+        const result = analyzeSession(
+            {
+                time: { data: time },
+                velocity_smooth: { data: velocity },
+                altitude: { data: new Array(n).fill(0) },
+            },
+            { gearUsed: '1850cm² Neil Pryde, 120L Fanatic' }
+        );
+
+        expect(result.stats.numberOfFlights).toBe(0);
+        expect(result.stats.percentFoil).toBe('0.0');
+        expect(result.foilSegments.length).toBe(0);
+    });
+
+    it('honors rider commentary when explicitly stating no foiling occurred', () => {
+        const n = 60;
+        const time = Array.from({ length: n }, (_, i) => i);
+        const velocity = new Array(n).fill(1.0);
+        for (let t = 15; t <= 30; t++) velocity[t] = 3.2; // would otherwise look like a flight
+
+        const result = analyzeSession(
+            {
+                time: { data: time },
+                velocity_smooth: { data: velocity },
+                altitude: { data: new Array(n).fill(0) },
+            },
+            {
+                gearUsed: '1850cm² Neil Pryde',
+                notes: "On the 21st of March the commentary says that I didn't have anytime on foil at majestic point."
+            }
+        );
+
+        expect(result.stats.numberOfFlights).toBe(0);
+        expect(result.stats.percentFoil).toBe('0.0');
+        expect(result.foilSegments.length).toBe(0);
+    });
 });

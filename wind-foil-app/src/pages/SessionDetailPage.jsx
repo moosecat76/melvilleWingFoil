@@ -41,7 +41,7 @@ const SessionDetailPage = () => {
                 setEntry(found);
                 let a = found.foilAnalysis;
                 if (found.streams && (!a || !a.adaptiveProfile || !a.maneuvers || !a.efficiency || a.adaptiveProfile.foilArea === undefined || a.stats?.percentFoilMoving === undefined)) {
-                    a = analyzeSession(found.streams, { windDirection: found.windDirection, gearUsed: found.gearUsed });
+                    a = analyzeSession(found.streams, { windDirection: found.windDirection, gearUsed: found.gearUsed, notes: found.notes });
                 } else if (a?.stats && a.stats.percentFoilMoving === undefined) {
                     const rawFoilMin = parseFloat(a.stats.totalFoilTime || 0);
                     const durationMin = parseFloat(found.activityStats?.duration || 0);

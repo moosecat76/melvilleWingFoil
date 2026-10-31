@@ -14,6 +14,8 @@
  *      offline or before a Gemini API key is configured.
  */
 
+import { isNoFoilExplicitlyStated } from './foilAnalysisService';
+
 const LOCAL_KEY_STORAGE = 'melvill_gemini_api_key';
 
 export const getStoredGeminiKey = () => {
@@ -191,6 +193,32 @@ export const buildDeterministicSessionDebrief = (payload) => {
     }
 
     // With full telemetry
+    const noFoilClaimed = isNoFoilExplicitlyStated(payload.notes);
+    const isZeroFoil = Number(t.percentFoil || 0) === 0 || t.flightsCount === 0 || noFoilClaimed;
+
+    if (isZeroFoil) {
+        const headline = `${sessionPrefix}Takeoff & Taxi Session at ${payload.spot} (Top Speed ${t.topSpeedKts} kts)`;
+        const whatWentWell = noFoilClaimed
+            ? `As noted in your session commentary, you didn't get up on foil today despite pushing board speed to ${t.topSpeedKts} kts. Working through the displacement taxi phase on ${payload.gearUsed} is essential muscle memory for learning board balance and finding your stance.`
+            : `Logged a dedicated taxi and takeoff practice session on ${payload.gearUsed}, reaching ${t.topSpeedKts} kts across ${t.distanceKm} km.`;
+
+        const tuningRecommendation = `A larger board has substantial surface area and hull suction that can feel sticky at 3–4 kts before lifting off. Slide your foil mast 1.0–2.0 cm forward in the tracks to generate earlier low-speed pitch lift, and pump your wing to full factory PSI for maximum canopy tension.`;
+
+        const techniqueFocus = `At ${t.topSpeedKts} kts you were approaching the ~5.5–6.5 kt takeoff threshold. Bear away 15°–20° off the wind to let the board accelerate through the hull drag hump before pumping, and avoid leaning back on the tail which sinks the board and creates water drag.`;
+
+        return {
+            headline,
+            sessionNumber: payload.sessionNumber || null,
+            riderStage: payload.riderStage || null,
+            whatWentWell,
+            tuningRecommendation,
+            techniqueFocus,
+            source: 'telemetry_heuristic',
+            model: 'Telemetry Coach Engine',
+            updatedAt: new Date().toISOString()
+        };
+    }
+
     const longestMin = (t.longestFlightSec / 60).toFixed(1);
     const whatWentWellParts = [];
     if (isNovice) {

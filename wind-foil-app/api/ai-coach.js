@@ -222,6 +222,12 @@ export default async function handler(req, res) {
                 '   - Directly acknowledge, validate, and respond to their self-analysis in the debrief (e.g. "You noted feeling...", "As you observed in your commentary..."). ' +
                 '   - Reconcile their subjective feeling with their objective telemetry metrics (e.g. comparing what they felt in turns or gusts against speed, flight %, and HR). ' +
                 '   - Answer any questions, gear experiments, or technique struggles they reflected on. ' +
+                '7. GROUND TRUTH OVERRIDE ON ZERO-FOIL SESSIONS: ' +
+                '   - If the rider commentary explicitly states they did not get on foil (e.g. "didn\'t have anytime on foil", "never got on foil", "no time on foil"), or if top speed was ~4-5 kts: ' +
+                '     * NEVER claim or hallucinate that the rider was on foil! Never state "You spent X% on foil" if the rider says they never got on foil. ' +
+                '     * Treat the session as a "Taxi & Takeoff Progression Session". ' +
+                '     * Explain the hydrodynamics: large boards create significant hull wetted suction and big foils have high displacement drag at 3-4 kts before reaching the ~6-7 kt takeoff threshold. ' +
+                '     * Advise sliding the foil mast 1-2 cm forward in the tracks to generate earlier low-speed pitch lift, pumping the wing to full spec PSI, and bearing away 15-20° off the wind to break hull suction. ' +
                 'Provide a sharp, encouraging, highly specific 3-part debrief: ' +
                 '1) What Went Well (cite exact metrics and validate the rider written self-analysis), ' +
                 '2) Tuning Recommendation (strictly wing foiling mechanics: wing PSI, foil mast track position in cm, stabilizer shim, or foil/wing sizing, addressing any gear feelings mentioned in their notes), ' +

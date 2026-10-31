@@ -92,6 +92,15 @@ export const extractFoilAreaCm2 = (gearUsed) => {
     return null;
 };
 
+/**
+ * Checks if the rider explicitly stated in their session commentary that they did not get on foil.
+ */
+export const isNoFoilExplicitlyStated = (notes) => {
+    if (!notes || typeof notes !== 'string') return false;
+    const n = notes.toLowerCase();
+    return /didn'?t (get|have|spend|manage|make it|stay|ever get).*(on|any|much).*foil|no (time|foil|flights).*on foil|never (got|made it).*on foil|zero (foil|flights)|couldn'?t (get|stay|make it).*on foil|wasn'?t (able to get|on) foil|failed to get on foil|didn'?t foil|never foiled/i.test(n);
+};
+
 const _computeAdaptiveSpeedProfile = (velocityStream, timeStream, options = {}) => {
     const validMoving = [];
     for (let i = 1; i < velocityStream.length; i++) {
@@ -124,29 +133,19 @@ const _computeAdaptiveSpeedProfile = (velocityStream, timeStream, options = {}) 
     }
 
     // Calibrate baseline priors based on foil surface area:
-    // Large foils (>= 1700 cm², e.g. 1850 cm²): early takeoff around 2.0-2.4 kts (~1.05 - 1.2 m/s), stall ~1.7 kts (~0.88 m/s)
-    // Mid foils (1200-1600 cm², e.g. 1250 cm²): takeoff around 3.8-4.2 kts (~1.95 - 2.15 m/s), stall ~2.9 kts (~1.5 m/s)
-    // Small foils (<= 1000 cm²): takeoff around 4.5-5.5 kts (~2.3 - 2.8 m/s), stall ~3.5 kts (~1.8 m/s)
+    // Large foils (>= 1700 cm², e.g. 1850 cm²): early takeoff ~6 kts (~1.85 - 2.05 m/s)
+    // Mid foils (1200-1600 cm², e.g. 1250 cm²): takeoff ~7-8 kts (~2.0 - 2.3 m/s)
+    // Small foils (<= 1000 cm²): takeoff ~9-11 kts (~2.3 - 2.6 m/s)
     let priorEntry = 1.95;
     let surgeThreshold = 0.40;
 
     if (foilArea) {
         if (foilArea >= 1700) {
-            priorEntry = 1.15; // ~2.2 kts
-            surgeThreshold = 0.25;
-        } else if (foilArea >= 1400) {
-            priorEntry = 1.50; // ~2.9 kts
-            surgeThreshold = 0.32;
+            priorEntry = 1.85;
+            surgeThreshold = 0.35;
         } else if (foilArea <= 1000) {
-            priorEntry = 2.30; // ~4.5 kts
+            priorEntry = 2.25;
             surgeThreshold = 0.45;
-        }
-    } else {
-        // If gear isn't explicitly noted, infer from speed distribution:
-        // A session with solid sustained runs peaking < 3.2 m/s (6.2 kts) indicates light wind on a big foil
-        if (p95 < 3.2 && p95 > 1.2) {
-            priorEntry = 1.20;
-            surgeThreshold = 0.28;
         }
     }
 
@@ -822,13 +821,11 @@ export const analyzeSession = (streams, options = {}) => {
     }
 
     // Speed mode: reject short "surges" that never reach real flight speed.
-    // Calibrated against rider-labelled data (2026-10-31): genuine flights peak at 4.5-5.2 m/s
-    // (9-10 kts) while displacement sailing / sailing in on knees tops out ~2.0-2.5 m/s (4-5 kts).
+    // Calibrated against wing foil hydrodynamics: genuine flights must peak at >= 2.8 m/s (5.5 kts)
+    // while displacement taxiing / slogging on a large board tops out ~1.8-2.3 m/s (3.5-4.5 kts).
     if (!hasValidAltitude && adaptiveProfile && foilSegments.length > 0) {
         const p95Val = adaptiveProfile.p95 || 0;
-        const minFlightPeak = p95Val >= 3.5
-            ? Math.max(2.8, p95Val * 0.6)
-            : Math.max(1.5, p95Val * 0.55);
+        const minFlightPeak = Math.max(2.8, p95Val * 0.6);
         for (let s = foilSegments.length - 1; s >= 0; s--) {
             const seg = foilSegments[s];
             let peak = 0;
@@ -843,6 +840,17 @@ export const analyzeSession = (streams, options = {}) => {
                 foilSegments.splice(s, 1);
             }
         }
+    }
+
+    // Commentary ground-truth override: if rider explicitly stated they didn't get on foil, respect their input
+    if (isNoFoilExplicitlyStated(options.notes)) {
+        for (let s = foilSegments.length - 1; s >= 0; s--) {
+            const seg = foilSegments[s];
+            for (let k = seg.start; k <= seg.end; k++) {
+                if (pointStates[k] === 'foiling') pointStates[k] = 'sailing';
+            }
+        }
+        foilSegments.length = 0;
     }
 
     // Merge micro-dips (< 3 seconds off-foil where speed stayed near stall threshold, e.g. mid-gybe)

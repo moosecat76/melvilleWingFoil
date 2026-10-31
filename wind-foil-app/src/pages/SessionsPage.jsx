@@ -257,7 +257,7 @@ const SessionsPage = () => {
             mapPolyline: entry.mapPolyline || null,
             streams: entry.streams || null,
             activityStats: entry.activityStats || null,
-            foilAnalysis: (entry.streams && (!entry.foilAnalysis || !entry.foilAnalysis.adaptiveProfile || entry.foilAnalysis.stats?.percentFoilMoving === undefined)) ? analyzeSession(entry.streams) : (entry.foilAnalysis || null)
+            foilAnalysis: (entry.streams && (!entry.foilAnalysis || !entry.foilAnalysis.adaptiveProfile || entry.foilAnalysis.stats?.percentFoilMoving === undefined)) ? analyzeSession(entry.streams, { windDirection: entry.windDirection, gearUsed: entry.gearUsed, notes: entry.notes }) : (entry.foilAnalysis || null)
         });
         setTcxFileName(entry.mapPolyline ? 'Saved track' : null);
         setIsAdding(true);
@@ -394,7 +394,7 @@ const SessionsPage = () => {
         try {
             let analysis = entry.foilAnalysis;
             if (entry.streams && (!analysis || !analysis.adaptiveProfile || !analysis.data || analysis.stats?.percentFoilMoving === undefined)) {
-                return analyzeSession(entry.streams) || analysis || null;
+                return analyzeSession(entry.streams, { windDirection: entry.windDirection, gearUsed: entry.gearUsed, notes: entry.notes }) || analysis || null;
             }
             if (analysis?.stats && analysis.stats.percentFoilMoving === undefined) {
                 const rawFoilMin = parseFloat(analysis.stats.totalFoilTime || 0);

@@ -150,4 +150,30 @@ describe('aiCoachService - Phase 5 AI Foil Coach', () => {
         expect(plan.gearTip).toContain('PSI');
         expect(plan.keyFocus).toContain('Carry 1–2 kts more entry speed into the gybe apex');
     });
+
+    it('handles zero-foil session correctly when commentary states no time on foil (Majestic Point scenario)', () => {
+        const payload = {
+            spot: 'Majestic Point',
+            sessionNumber: 1,
+            totalSessions: 20,
+            gearUsed: '5m Wing, 1850cm² Foil, 120L Board',
+            notes: "I didn't have anytime on foil at majestic point. Got to 4knt on the bigger board.",
+            telemetry: {
+                topSpeedKts: 4.1,
+                avgFoilSpeedKts: 0,
+                percentFoil: 0,
+                totalFoilMin: 0,
+                flightsCount: 0,
+                distanceKm: 3.2
+            }
+        };
+
+        const debrief = buildDeterministicSessionDebrief(payload);
+        expect(debrief.headline).toContain('Takeoff & Taxi Session');
+        expect(debrief.whatWentWell).not.toContain('% of the session on foil');
+        expect(debrief.whatWentWell).toContain("didn't get up on foil");
+        expect(debrief.tuningRecommendation).toContain('larger board');
+        expect(debrief.tuningRecommendation).toContain('Slide your foil mast 1.0–2.0 cm forward');
+        expect(debrief.techniqueFocus).toContain('takeoff threshold');
+    });
 });
