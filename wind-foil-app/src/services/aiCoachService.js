@@ -39,8 +39,9 @@ export const setStoredGeminiKey = (key) => {
 /**
  * Condenses a full journal entry (which may contain thousands of GPS/HR stream points)
  * into a compact ~300-token summary payload suitable for LLM coaching.
+ * Accepts optional sessionContext to track chronological progression (e.g. Session #4 of 42).
  */
-export const buildCompactSessionPayload = (entry, computedAnalysis = null) => {
+export const buildCompactSessionPayload = (entry, computedAnalysis = null, sessionContext = null) => {
     if (!entry) return {};
     const analysis = computedAnalysis || entry.foilAnalysis || {};
     const stats = analysis.stats || {};
@@ -49,6 +50,12 @@ export const buildCompactSessionPayload = (entry, computedAnalysis = null) => {
     const activityStats = entry.activityStats || {};
 
     return {
+        sessionNumber: sessionContext?.sessionNumber ?? entry.sessionNumber ?? null,
+        totalSessions: sessionContext?.totalSessions ?? entry.totalSessions ?? null,
+        priorSessionsCount: sessionContext?.priorSessionsCount ?? null,
+        riderStage: sessionContext?.riderStage ?? null,
+        priorRecentSessions: sessionContext?.priorRecentSessions ?? [],
+        recentAnalysis: sessionContext?.recentAnalysis ?? null,
         date: entry.date ? String(entry.date).slice(0, 16) : null,
         spot: entry.locationName || entry.locationId || 'Unknown Spot',
         rating: Number(entry.rating) || 3,
@@ -155,20 +162,28 @@ export const buildDeterministicSessionDebrief = (payload) => {
     const t = payload.telemetry;
     const windStr = payload.windKts ? `${payload.windKts} kts${payload.gustKts ? ` (gusting ${payload.gustKts} kts)` : ''}` : 'recorded conditions';
     const spread = (payload.gustKts && payload.windKts) ? Math.max(0, payload.gustKts - payload.windKts) : 0;
+    const sessionPrefix = payload.sessionNumber
+        ? `Session #${payload.sessionNumber}${payload.totalSessions ? ` of ${payload.totalSessions}` : ''} • `
+        : '';
+    const isNovice = payload.sessionNumber && payload.sessionNumber <= 5;
 
     if (!t) {
         const tags = buildDeterministicCoachTags(payload);
         return {
-            headline: `${payload.rating}★ session at ${payload.spot} in ${windStr} on ${payload.gearUsed}.`,
+            headline: `${sessionPrefix}${payload.rating}★ session at ${payload.spot} in ${windStr} on ${payload.gearUsed}.`,
+            sessionNumber: payload.sessionNumber || null,
+            riderStage: payload.riderStage || null,
             whatWentWell: payload.notes
-                ? `Logged solid water time on ${payload.gearUsed}. Power state registered as ${tags.powerState.replace('_', ' ')} with ${tags.foilSentiment.replace('_', ' ')} foil feel.`
+                ? `Logged solid water time on ${payload.gearUsed}. Power state registered as ${tags.powerState.replace('_', ' ')} with ${tags.foilSentiment.replace('_', ' ')} foil feel.${payload.sessionNumber ? ` Solid foundation built for Session #${payload.sessionNumber}.` : ''}`
                 : `Consistent session logged at ${payload.spot} with ${payload.gearUsed} in ${windStr}.`,
             tuningRecommendation: tags.powerState === 'overpowered' || tags.powerState === 'slightly_overpowered'
-                ? `For ${windStr}, move your mast base 0.5–1.0 cm further back in the tracks or step down 0.5–1.0m in wing size to keep front-foot pressure manageable in gusts.`
+                ? `For ${windStr}, slide your foil mast 0.5–1.0 cm back in the tracks and pump wing to full factory PSI for canopy rigidity in gusts, or step down 0.5–1.0m in wing size to keep front-foot pressure manageable.`
                 : tags.powerState === 'underpowered'
-                    ? `In lighter lulls around ${payload.windKts || 12} kts, slide the mast base 0.5 cm forward for earlier pitch stability when pumping onto foil.`
-                    : `Your ${payload.gearUsed} setup is well matched to ${windStr}; keep this mast track position as your baseline reference.`,
-            techniqueFocus: `Focus on building board speed slightly off-the-wind (10°–15° below a beam reach) before initiating your pump cadence, and attach a GPX/TCX or Google Health track next session to unlock turn & VMG telemetry.`,
+                    ? `In lighter lulls around ${payload.windKts || 12} kts, slide your foil mast 0.5 cm forward in the tracks for earlier takeoff lift, and use standard/slightly softer PSI for maximum low-end draft.`
+                    : `Your ${payload.gearUsed} setup is well matched to ${windStr}; keep this foil mast track position as your baseline reference.`,
+            techniqueFocus: isNovice
+                ? `Focus on keeping your hips centered over your front foot during takeoff to avoid stalling or breaching, and keep hands close together on the wing handles/boom.`
+                : `Focus on building board speed slightly off-the-wind (10°–15° below a beam reach) before initiating your pump cadence, and attach a GPX/TCX or Google Health track next session to unlock turn & VMG telemetry.`,
             source: 'telemetry_heuristic',
             model: 'Telemetry Coach Engine',
             updatedAt: new Date().toISOString()
@@ -177,29 +192,39 @@ export const buildDeterministicSessionDebrief = (payload) => {
 
     // With full telemetry
     const longestMin = (t.longestFlightSec / 60).toFixed(1);
-    const whatWentWellParts = [
+    const whatWentWellParts = [];
+    if (isNovice) {
+        whatWentWellParts.push(`At Session #${payload.sessionNumber} (${payload.riderStage || 'Novice stage'}), you're building foundational flight control!`);
+    }
+    whatWentWellParts.push(
         `You spent ${t.percentFoil}% of the session on foil (${t.totalFoilMin} min across ${t.flightsCount} flights) with a top speed of ${t.topSpeedKts} kts and a longest continuous flight of ${longestMin} min.`
-    ];
+    );
     if (t.gybeAttempts > 0) {
         whatWentWellParts.push(`You completed ${t.gybesCompleted}/${t.gybeAttempts} foiling turns (${t.gybeCompletionPct}% dry completion).`);
     }
     if (t.avgFoilingHr && t.avgPumpingHr && t.avgPumpingHr > t.avgFoilingHr) {
         whatWentWellParts.push(`Once on foil, your heart rate settled to ${t.avgFoilingHr} bpm vs ${t.avgPumpingHr} bpm during takeoff/pumping (${t.avgPumpingHr - t.avgFoilingHr} bpm efficiency savings).`);
     }
+    if (payload.recentAnalysis?.techniqueFocus) {
+        const prevShort = payload.recentAnalysis.techniqueFocus.split(/[.;]/)[0].trim();
+        whatWentWellParts.push(`Continuity: Built upon prior session drill ("${prevShort}").`);
+    }
 
     let tuningRec = '';
     if (spread >= 7) {
-        tuningRec = `With a ${spread.toFixed(0)} kt gust spread (${windStr}), move your foil mast 0.5 cm back in the box to prevent over-foiling in peak gusts while relying on your ${payload.gearUsed} glide to bridge lulls.`;
+        tuningRec = `With a ${spread.toFixed(0)} kt gust spread (${windStr}), slide your foil mast 0.5–1.0 cm back in the tracks to prevent over-foiling in peak gusts, pump leading edge & strut to full recommended PSI to prevent canopy distortion, and rely on your ${payload.gearUsed} glide to bridge lulls.`;
     } else if (t.takeoffConversionPct != null && t.takeoffConversionPct < 60) {
-        tuningRec = `Your takeoff conversion was ${t.takeoffConversionPct}%: try shifting your mast base 0.5 cm forward or adding +0.5° stabilizer shim to generate earlier low-end lift during speed surges.`;
+        tuningRec = `Your takeoff conversion was ${t.takeoffConversionPct}%: try shifting your foil mast 0.5 cm forward in the tracks or adding +0.5° stabilizer shim to generate earlier low-end lift during speed surges.`;
     } else if (t.topSpeedKts >= 18) {
         tuningRec = `Hitting ${t.topSpeedKts} kts shows strong top-end pace on ${payload.gearUsed}; a slightly flatter (0° or -0.5°) rear stabilizer shim will reduce drag and unlock another 1–2 kts of glide speed.`;
     } else {
-        tuningRec = `Your ${payload.gearUsed} setup delivered ${t.percentFoil}% foil time in ${windStr}; mark your current mast track position as your sweet-spot baseline for ${Math.round(payload.windKts || 16)} kt days.`;
+        tuningRec = `Your ${payload.gearUsed} setup delivered ${t.percentFoil}% foil time in ${windStr}; mark your current foil mast track position as your sweet-spot baseline for ${Math.round(payload.windKts || 16)} kt days.`;
     }
 
     let techniqueFocus = '';
-    if (t.gybeAttempts > 0 && t.gybeCompletionPct < 65) {
+    if (isNovice) {
+        techniqueFocus = `Focus on committing your weight forward over the board centerline during acceleration, and avoid pulling back on the rear wing handle until the board is planing cleanly.`;
+    } else if (t.gybeAttempts > 0 && t.gybeCompletionPct < 65) {
         techniqueFocus = `Carry 1–2 kts more entry speed into the gybe apex and initiate your carve before depowering the wing so the foil stays pressurized above stall speed (${Math.max(8, (t.avgFoilSpeedKts - 3)).toFixed(1)} kts) through the foot switch.`;
     } else if (t.portFoilSec != null && t.starboardFoilSec != null && (t.portFoilSec + t.starboardFoilSec) > 120) {
         const portPct = Math.round((t.portFoilSec / (t.portFoilSec + t.starboardFoilSec)) * 100);
@@ -217,7 +242,9 @@ export const buildDeterministicSessionDebrief = (payload) => {
     }
 
     return {
-        headline: `${t.percentFoil}% Foil Time & ${t.topSpeedKts} kts Peak Speed at ${payload.spot}`,
+        headline: `${sessionPrefix}${t.percentFoil}% Foil Time & ${t.topSpeedKts} kts Peak Speed at ${payload.spot}`,
+        sessionNumber: payload.sessionNumber || null,
+        riderStage: payload.riderStage || null,
         whatWentWell: whatWentWellParts.join(' '),
         tuningRecommendation: tuningRec,
         techniqueFocus,
@@ -231,7 +258,16 @@ export const buildDeterministicSessionDebrief = (payload) => {
  * Deterministic fallback for 5.3 Pre-Session "Coach's Game Plan".
  */
 export const buildDeterministicGamePlan = (payload) => {
-    const { spotName, windKts, gustKts, windDirDeg, tideM, recommendedGear, pastMatches = [] } = payload;
+    const {
+        spotName,
+        windKts,
+        gustKts,
+        windDirDeg,
+        tideM,
+        recommendedGear,
+        pastMatches = [],
+        recentSessionAnalysis = null
+    } = payload;
     const spread = Math.max(0, (gustKts || windKts) - windKts);
     const bestPast = pastMatches[0];
 
@@ -241,16 +277,22 @@ export const buildDeterministicGamePlan = (payload) => {
 
     const briefing = `${spotName} is forecasting ${windKts} kts gusting ${gustKts} kts (${windDirDeg}°)${tideM != null ? ` with a ${Number(tideM).toFixed(2)}m tide` : ''}—rig your ${recommendedGear}. ${pastContext}`;
 
-    let gearTip = `Set your mast base in your standard middle position for ${recommendedGear}.`;
+    let gearTip = `Set your foil mast in your standard track position for ${recommendedGear}.`;
     if (spread >= 7.5) {
-        gearTip = `Expect a +${Math.round(spread)} kt gust spread: rig the wing slightly flatter/tighter on outhaul and move your foil mast 0.5 cm back to handle the ${gustKts} kt bullets.`;
+        gearTip = `Expect a +${Math.round(spread)} kt gust spread: pump your leading edge & strut to full recommended PSI for canopy stiffness, and slide your foil mast 0.5–1.0 cm back in the tracks to handle the ${gustKts} kt bullets.`;
     } else if (tideM != null && tideM < 0.7) {
         gearTip = `Low tide (${Number(tideM).toFixed(2)}m): walk out past the inside sandbar before flipping the foil over to protect your front wing tip.`;
     }
 
-    const keyFocus = spread >= 7.5
+    let keyFocus = spread >= 7.5
         ? `Bear away 10° in the lulls to maintain apparent wind speed on foil, then pinch higher upwind during the gusts.`
         : `Use the steady ${windKts} kt breeze to lock in high-speed foiling gybe entries and balanced upwind tacks.`;
+
+    const recentDebrief = recentSessionAnalysis?.coachDebrief;
+    if (recentDebrief?.techniqueFocus) {
+        const shortDrill = recentDebrief.techniqueFocus.split(/[.;]/)[0].trim();
+        keyFocus = `Carry forward your recent coaching focus (${shortDrill}): ${keyFocus.charAt(0).toLowerCase() + keyFocus.slice(1)}`;
+    }
 
     return {
         briefing,
@@ -296,8 +338,8 @@ const callCoachEndpoint = async (mode, payload) => {
 /**
  * 5.1 Extracts structured `coachTags` for a session (using `gemini-3.5-flash-lite` or deterministic fallback).
  */
-export const extractSessionCoachTags = async (entry, computedAnalysis = null) => {
-    const payload = buildCompactSessionPayload(entry, computedAnalysis);
+export const extractSessionCoachTags = async (entry, computedAnalysis = null, sessionContext = null) => {
+    const payload = buildCompactSessionPayload(entry, computedAnalysis, sessionContext);
     try {
         const result = await callCoachEndpoint('extract_tags', payload);
         if (!result.fallback && result.data) {
@@ -317,13 +359,15 @@ export const extractSessionCoachTags = async (entry, computedAnalysis = null) =>
 /**
  * 5.2 Generates a 3-part Post-Session Coaching Debrief (using `gemini-3.8-flash` or deterministic fallback).
  */
-export const generateSessionCoachDebrief = async (entry, computedAnalysis = null) => {
-    const payload = buildCompactSessionPayload(entry, computedAnalysis);
+export const generateSessionCoachDebrief = async (entry, computedAnalysis = null, sessionContext = null) => {
+    const payload = buildCompactSessionPayload(entry, computedAnalysis, sessionContext);
     try {
         const result = await callCoachEndpoint('session_debrief', payload);
         if (!result.fallback && result.data) {
             return {
                 ...result.data,
+                sessionNumber: payload.sessionNumber || null,
+                riderStage: payload.riderStage || null,
                 source: 'gemini',
                 model: result.model || 'gemini-3.8-flash',
                 updatedAt: new Date().toISOString()

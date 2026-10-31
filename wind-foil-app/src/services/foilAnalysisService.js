@@ -75,37 +75,38 @@ export const formatDurationSec = (sec) => {
  *   1. Displacement / taxiing / slogging regime (lower cluster)
  *   2. Planing / on-foil regime (upper tail separated by takeoff acceleration)
  */
-const _computeAdaptiveSpeedProfile = (velocityStream, timeStream) => {
-    // Filter out initial GPS spike at t=0 (common when watch acquires lock) and stationary points
+/**
+ * Extracts front wing foil surface area in cm² from gear description or equipment strings.
+ * e.g. "1850cm² Neil Pryde", "1250cm", "foil 1850", "Neil Pryde 1850"
+ */
+export const extractFoilAreaCm2 = (gearUsed) => {
+    if (!gearUsed || typeof gearUsed !== 'string') return null;
+    const m = gearUsed.match(/(\d{3,4})\s*(?:cm²|cm2|cm)\b/i) ||
+              gearUsed.match(/foil[^\d]*(\d{3,4})\b/i) ||
+              gearUsed.match(/(\d{3,4})\s*(?:Neil Pryde|Severne|F-One|GoFoil|Armstrong|Axis|Slingshot|Fanatic|Duotone|Naish)\s*foil/i) ||
+              gearUsed.match(/(\d{3,4})\s*foil\b/i);
+    if (m) {
+      const val = parseInt(m[1], 10);
+      if (val >= 500 && val <= 3200) return val;
+    }
+    return null;
+};
+
+const _computeAdaptiveSpeedProfile = (velocityStream, timeStream, options = {}) => {
     const validMoving = [];
     for (let i = 1; i < velocityStream.length; i++) {
         const v = velocityStream[i];
-        if (v >= 0.3 && v < 25) {
+        if (v >= 0.25 && v < 25) {
             validMoving.push(v);
         }
-    }
-
-    if (validMoving.length < 10) {
-        return {
-            displacementSpeed: 0.8,
-            foilEntrySpeed: 1.9,
-            sustainedFoilSpeed: 2.2,
-            stallSpeed: 1.5,
-            surgeDelta: 0.45,
-        };
     }
 
     const sorted = [...validMoving].sort((a, b) => a - b);
     const p25 = _percentile(sorted, 0.25);
     const p95 = _percentile(sorted, 0.95);
+    const foilArea = extractFoilAreaCm2(options.gearUsed);
 
-    // 1. Estimate typical displacement (off-foil) sailing speed
-    const lowerHalf = sorted.filter(v => v <= 1.6);
-    const displacementBase = lowerHalf.length > 0
-        ? lowerHalf.reduce((a, b) => a + b, 0) / lowerHalf.length
-        : Math.min(p25, 1.0);
-
-    // 2. Analyze speeds where strongest positive accelerations (takeoff surges) occur
+    // Analyze speeds where positive takeoff accelerations (surges) occur
     const surgeCrossings = [];
     for (let i = 2; i < velocityStream.length - 1; i++) {
         let lookback = i - 1;
@@ -113,21 +114,51 @@ const _computeAdaptiveSpeedProfile = (velocityStream, timeStream) => {
             lookback--;
         }
         const dt = timeStream[i] - timeStream[lookback];
-        if (dt >= 1.5 && dt <= 6) {
+        if (dt >= 1.0 && dt <= 5.5) {
             const dv = velocityStream[i] - velocityStream[lookback];
             const accel = dv / dt;
-            if (dv >= 0.5 && accel >= 0.18 && velocityStream[i] >= 1.5 && velocityStream[lookback] >= 0.4) {
-                surgeCrossings.push((velocityStream[i] + velocityStream[lookback]) * 0.55);
+            if (dv >= 0.35 && accel >= 0.15 && velocityStream[i] >= 0.9) {
+                surgeCrossings.push((velocityStream[i] + velocityStream[lookback]) * 0.5);
             }
         }
     }
 
-    // 3. Otsu-style bimodal valley search between [1.4 m/s, 2.6 m/s]
-    let bestOtsuThreshold = 1.95;
+    // Calibrate baseline priors based on foil surface area:
+    // Large foils (>= 1700 cm², e.g. 1850 cm²): early takeoff around 2.0-2.4 kts (~1.05 - 1.2 m/s), stall ~1.7 kts (~0.88 m/s)
+    // Mid foils (1200-1600 cm², e.g. 1250 cm²): takeoff around 3.8-4.2 kts (~1.95 - 2.15 m/s), stall ~2.9 kts (~1.5 m/s)
+    // Small foils (<= 1000 cm²): takeoff around 4.5-5.5 kts (~2.3 - 2.8 m/s), stall ~3.5 kts (~1.8 m/s)
+    let priorEntry = 1.95;
+    let surgeThreshold = 0.40;
+
+    if (foilArea) {
+        if (foilArea >= 1700) {
+            priorEntry = 1.15; // ~2.2 kts
+            surgeThreshold = 0.25;
+        } else if (foilArea >= 1400) {
+            priorEntry = 1.50; // ~2.9 kts
+            surgeThreshold = 0.32;
+        } else if (foilArea <= 1000) {
+            priorEntry = 2.30; // ~4.5 kts
+            surgeThreshold = 0.45;
+        }
+    } else {
+        // If gear isn't explicitly noted, infer from speed distribution:
+        // A session with solid sustained runs peaking < 3.2 m/s (6.2 kts) indicates light wind on a big foil
+        if (p95 < 3.2 && p95 > 1.2) {
+            priorEntry = 1.20;
+            surgeThreshold = 0.28;
+        }
+    }
+
+    // Otsu-style bimodal search around the equipment prior
+    let minSearch = Math.max(0.8, priorEntry - 0.4);
+    let maxSearch = Math.min(2.8, priorEntry + 0.5);
+    let bestOtsu = priorEntry;
     let maxBetweenVar = -1;
-    const activeSpeeds = sorted.filter(v => v >= 0.5);
+
+    const activeSpeeds = sorted.filter(v => v >= 0.35);
     if (activeSpeeds.length >= 20) {
-        for (let t = 1.45; t <= 2.55; t += 0.05) {
+        for (let t = minSearch; t <= maxSearch; t += 0.05) {
             const c0 = activeSpeeds.filter(v => v < t);
             const c1 = activeSpeeds.filter(v => v >= t);
             if (c0.length < 5 || c1.length < 5) continue;
@@ -137,34 +168,28 @@ const _computeAdaptiveSpeedProfile = (velocityStream, timeStream) => {
             const mu0 = c0.reduce((a, b) => a + b, 0) / c0.length;
             const mu1 = c1.reduce((a, b) => a + b, 0) / c1.length;
 
-            if (mu1 - mu0 < 0.8) continue;
+            if (mu1 - mu0 < 0.35) continue;
 
-            const priorWeight = Math.exp(-((t - 1.95) ** 2) / (2 * 0.35 ** 2));
+            const priorWeight = Math.exp(-((t - priorEntry) ** 2) / (2 * 0.35 ** 2));
             const betweenVar = w0 * w1 * ((mu0 - mu1) ** 2) * priorWeight;
             if (betweenVar > maxBetweenVar) {
                 maxBetweenVar = betweenVar;
-                bestOtsuThreshold = t;
+                bestOtsu = t;
             }
         }
     }
 
-    // 4. Combine Otsu bimodal boundary, surge crossing median, and session speed range
-    const surgeMedian = surgeCrossings.length >= 3
-        ? _percentile([...surgeCrossings].sort((a, b) => a - b), 0.5)
-        : bestOtsuThreshold;
-
-    const rawEntry = 0.6 * bestOtsuThreshold + 0.25 * surgeMedian + 0.15 * Math.max(1.8, displacementBase + 1.0);
-    const foilEntrySpeed = Number(Math.min(2.2, Math.max(1.75, rawEntry)).toFixed(2));
-    const sustainedFoilSpeed = Number(Math.min(2.6, Math.max(foilEntrySpeed + 0.25, 2.25)).toFixed(2));
-    const stallSpeed = Number(Math.max(1.4, foilEntrySpeed * 0.82).toFixed(2));
-    const surgeDelta = Number(Math.max(0.35, (foilEntrySpeed - displacementBase) * 0.35).toFixed(2));
+    const foilEntrySpeed = Number(bestOtsu.toFixed(2));
+    const sustainedFoilSpeed = Number((foilEntrySpeed * 1.15).toFixed(2));
+    const stallSpeed = Number(Math.max(0.70, foilEntrySpeed * 0.78).toFixed(2));
 
     return {
-        displacementSpeed: Number(displacementBase.toFixed(2)),
+        displacementSpeed: Number(Math.min(p25, stallSpeed * 0.7).toFixed(2)),
+        foilArea,
         foilEntrySpeed,
         sustainedFoilSpeed,
         stallSpeed,
-        surgeDelta,
+        surgeDelta: surgeThreshold,
         p95: Number(p95.toFixed(2)),
     };
 };
@@ -614,7 +639,7 @@ export const analyzeSession = (streams, options = {}) => {
     let currentSegment = null;
     let potentialStart = -1;
     let isCurrentlyFoiling = false;
-    let adaptiveProfile = null;
+    let adaptiveProfile = _computeAdaptiveSpeedProfile(velocityStream, timeStream, options);
 
     if (hasValidAltitude) {
         // ── Mode A: Altitude + Speed Detection ──────────────────────────────────
@@ -688,7 +713,7 @@ export const analyzeSession = (streams, options = {}) => {
         }
     } else {
         // ── Mode B: Adaptive Multi-Factor Speed Detection ───────────────────────
-        adaptiveProfile = _computeAdaptiveSpeedProfile(velocityStream, timeStream);
+        adaptiveProfile = _computeAdaptiveSpeedProfile(velocityStream, timeStream, options);
         const {
             displacementSpeed: initialDispSpeed,
             foilEntrySpeed,
@@ -799,8 +824,11 @@ export const analyzeSession = (streams, options = {}) => {
     // Speed mode: reject short "surges" that never reach real flight speed.
     // Calibrated against rider-labelled data (2026-10-31): genuine flights peak at 4.5-5.2 m/s
     // (9-10 kts) while displacement sailing / sailing in on knees tops out ~2.0-2.5 m/s (4-5 kts).
-    if (!hasValidAltitude && adaptiveProfile && foilSegments.length > 0 && (adaptiveProfile.p95 || 0) >= 3.5) {
-        const minFlightPeak = Math.max(2.8, adaptiveProfile.p95 * 0.6);
+    if (!hasValidAltitude && adaptiveProfile && foilSegments.length > 0) {
+        const p95Val = adaptiveProfile.p95 || 0;
+        const minFlightPeak = p95Val >= 3.5
+            ? Math.max(2.8, p95Val * 0.6)
+            : Math.max(1.5, p95Val * 0.55);
         for (let s = foilSegments.length - 1; s >= 0; s--) {
             const seg = foilSegments[s];
             let peak = 0;

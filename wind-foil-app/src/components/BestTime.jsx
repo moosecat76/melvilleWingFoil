@@ -96,6 +96,21 @@ const BestTime = ({
         try {
             const targetLocId = primary.locationId || locationId;
             const targetLocName = primary.locationName || locationName;
+
+            // Extract recent session coaching context
+            const sortedByDateDesc = [...(sessions || [])].sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+            const mostRecentWithDebrief = sortedByDateDesc.find(s => s.coachDebrief) || sortedByDateDesc[0] || null;
+            const recentSessionAnalysis = mostRecentWithDebrief ? {
+                date: mostRecentWithDebrief.date,
+                spot: mostRecentWithDebrief.locationName || mostRecentWithDebrief.locationId,
+                windKts: mostRecentWithDebrief.windSpeed,
+                gearUsed: mostRecentWithDebrief.gearUsed,
+                percentFoil: mostRecentWithDebrief.foilAnalysis?.stats?.percentFoil || null,
+                notes: (mostRecentWithDebrief.notes || '').slice(0, 180),
+                coachDebrief: mostRecentWithDebrief.coachDebrief || null,
+                coachTags: mostRecentWithDebrief.coachTags || null
+            } : null;
+
             const pastMatches = findSimilarPastSessions(
                 { speedKmh: primary.avgSpeed, gustsKmh: primary.maxGusts, direction: primary.avgDirection },
                 sessions,
@@ -107,6 +122,8 @@ const BestTime = ({
                 windKts: m.windKts,
                 gearUsed: m.entry.gearUsed,
                 percentFoil: m.entry.foilAnalysis?.stats?.percentFoil || null,
+                coachDebrief: m.entry.coachDebrief || null,
+                coachTags: m.entry.coachTags || null,
                 notes: (m.entry.notes || '').slice(0, 180)
             }));
 
@@ -119,6 +136,8 @@ const BestTime = ({
                 windDirDeg: Math.round(primary.avgDirection),
                 tideM: primary.hourlyData?.[0]?.tide ?? currentTide ?? null,
                 recommendedGear: primary.gear?.text || 'Standard Setup',
+                totalSessionsCount: sortedByDateDesc.length,
+                recentSessionAnalysis,
                 pastMatches
             });
             setGamePlan(plan);

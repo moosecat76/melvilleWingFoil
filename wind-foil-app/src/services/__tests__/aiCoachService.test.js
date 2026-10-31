@@ -87,6 +87,51 @@ describe('aiCoachService - Phase 5 AI Foil Coach', () => {
         expect(plan.briefing).toContain('Melville Waters');
         expect(plan.briefing).toContain('5m Strike + 950cm² Phantom');
         expect(plan.gearTip).toContain('gust spread');
+        expect(plan.gearTip).not.toContain('outhaul');
+        expect(plan.gearTip).toContain('PSI');
         expect(plan.keyFocus).toBeTruthy();
+    });
+
+    it('contextualizes older & out-of-sequence sessions with session number and rider stage', () => {
+        const sessionContext = {
+            sessionNumber: 3,
+            totalSessions: 35,
+            priorSessionsCount: 2,
+            riderStage: 'Novice • First Flights',
+            recentAnalysis: {
+                techniqueFocus: 'Center hips over front foot'
+            }
+        };
+        const payload = buildCompactSessionPayload(mockEntry, null, sessionContext);
+        expect(payload.sessionNumber).toBe(3);
+        expect(payload.totalSessions).toBe(35);
+        expect(payload.riderStage).toBe('Novice • First Flights');
+
+        const debrief = buildDeterministicSessionDebrief(payload);
+        expect(debrief.headline).toContain('Session #3 of 35');
+        expect(debrief.whatWentWell).toContain('Session #3 (Novice • First Flights)');
+        expect(debrief.whatWentWell).toContain('Center hips over front foot');
+        expect(debrief.tuningRecommendation).not.toContain('outhaul');
+        expect(debrief.tuningRecommendation).toContain('foil mast');
+    });
+
+    it('synthesizes recent session debrief focus into the pre-session game plan', () => {
+        const plan = buildDeterministicGamePlan({
+            spotName: 'The Wall - Hillarys Harbour',
+            windKts: 10,
+            gustKts: 26,
+            windDirDeg: 224,
+            tideM: 0.45,
+            recommendedGear: '5m Cabrinha + 1250cm² Neil Pryde',
+            pastMatches: [{ windKts: 9.4, rating: 5, percentFoil: 34, gearUsed: '5m Cabrinha' }],
+            recentSessionAnalysis: {
+                coachDebrief: {
+                    techniqueFocus: 'Carry 1–2 kts more entry speed into the gybe apex'
+                }
+            }
+        });
+        expect(plan.gearTip).not.toContain('outhaul');
+        expect(plan.gearTip).toContain('PSI');
+        expect(plan.keyFocus).toContain('Carry 1–2 kts more entry speed into the gybe apex');
     });
 });

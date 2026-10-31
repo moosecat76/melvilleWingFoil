@@ -403,6 +403,16 @@ const SessionsPage = () => {
         }
     };
 
+    // Chronological session numbering (1 to N based on ascending session date)
+    const sessionNumberMap = useMemo(() => {
+        const sorted = [...entries].sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+        const map = new Map();
+        sorted.forEach((e, idx) => {
+            if (e.id) map.set(String(e.id), idx + 1);
+        });
+        return map;
+    }, [entries]);
+
     // Distinct locations for filter dropdown
     const uniqueLocations = useMemo(() => {
         const set = new Set();
@@ -1016,7 +1026,12 @@ const SessionsPage = () => {
                                             </div>
 
                                             {/* Date & Rating */}
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                                                {sessionNumberMap.has(String(entry.id)) && (
+                                                    <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--accent-primary)', background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.22)', padding: '1px 6px', borderRadius: '4px' }}>
+                                                        #{sessionNumberMap.get(String(entry.id))}
+                                                    </span>
+                                                )}
                                                 <span style={{ fontWeight: 600, fontSize: '1rem' }}>
                                                     {safeFormatDate(entry.date, 'EEE dd MMM')}
                                                 </span>

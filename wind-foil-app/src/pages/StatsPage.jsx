@@ -56,7 +56,7 @@ const StatsPage = () => {
                 let analysis = entry.foilAnalysis;
                 if (entry.streams && (!analysis || !analysis.maneuvers || analysis.stats?.longestFlightSec == null)) {
                     try {
-                        analysis = analyzeSession(entry.streams, { windDirection: entry.windDirection }) || analysis;
+                        analysis = analyzeSession(entry.streams, { windDirection: entry.windDirection, gearUsed: entry.gearUsed }) || analysis;
                     } catch (_) {
                         // Keep stored analysis if re-computation fails
                     }

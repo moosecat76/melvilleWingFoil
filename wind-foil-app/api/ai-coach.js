@@ -99,19 +99,19 @@ const DEBRIEF_JSON_SCHEMA = {
     properties: {
         headline: {
             type: 'string',
-            description: 'A concise 1-sentence headline summarizing the session performance.'
+            description: 'A concise 1-sentence headline summarizing performance, noting the chronological session number and progression stage when provided (e.g. Session #4 of 42 • Novice Stage).'
         },
         whatWentWell: {
             type: 'string',
-            description: 'Specific positive insights referencing the rider telemetry (flights, gybe %, speed, or HR efficiency) and notes.'
+            description: 'Specific positive insights calibrated to the rider progression stage at this specific session number, referencing telemetry (flights, gybe %, speed, or HR efficiency) and notes.'
         },
         tuningRecommendation: {
             type: 'string',
-            description: 'Actionable gear or rig tuning advice (wing size, foil front wing/stabilizer shim, or mast base track position) for these conditions.'
+            description: 'Actionable wing foiling gear advice (wing PSI, foil mast track position in cm, stabilizer shim, or wing/foil sizing). Inflatable wings have NO outhauls or downhauls — strictly use wing foiling mechanics.'
         },
         techniqueFocus: {
             type: 'string',
-            description: 'Concrete technique drill or focus for the next session (e.g. gybe entry speed, foot switch timing, pump-to-glide transition).'
+            description: 'Concrete technique drill or focus appropriate for their progression stage at this session number (e.g. board trim/takeoff balance for early sessions, gybe apex speed or foot switch timing for intermediate/advanced).'
         }
     },
     required: ['headline', 'whatWentWell', 'tuningRecommendation', 'techniqueFocus']
@@ -122,15 +122,15 @@ const GAME_PLAN_JSON_SCHEMA = {
     properties: {
         briefing: {
             type: 'string',
-            description: 'A punchy 2-sentence pre-session Coach Game Plan synthesizing wind, gusts, tide, recommended setup, and past sessions at this spot.'
+            description: 'A punchy 2-sentence pre-session Coach Game Plan synthesizing wind, gusts, tide, recommended setup, past sessions at this spot, and recent coaching analysis.'
         },
         gearTip: {
             type: 'string',
-            description: 'One short sentence on rigging/setup adjustment for the forecasted gust spread and tide.'
+            description: 'One short sentence on wing foiling rigging adjustment (wing PSI on leading edge/strut, foil mast track position in cm, or stabilizer shim) for the forecasted gust spread and tide. Inflatable wings have NO outhauls or downhauls — never mention outhauls or windsurfing terms.'
         },
         keyFocus: {
             type: 'string',
-            description: 'One short tactical focus for the water today.'
+            description: 'One short tactical focus for the water today, connecting to the rider recent session debrief focus if available.'
         }
     },
     required: ['briefing', 'gearTip', 'keyFocus']
@@ -200,18 +200,41 @@ export default async function handler(req, res) {
             model = 'gemini-3.8-flash';
             schema = DEBRIEF_JSON_SCHEMA;
             systemInstruction =
-                'You are an elite Wing Foil Coach. ' +
-                'Analyze the rider session summary (wind, gusts, gear used, flight stats, gybe completion, takeoff conversion, heart-rate efficiency, and rider notes). ' +
+                'You are an elite Wing Foil Coach analyzing a rider session summary. ' +
+                'CRITICAL EQUIPMENT & RIGGING RULES: ' +
+                '1. The sport is strictly WING FOILING (handheld inflatable wing and hydrofoil board). ' +
+                '2. Inflatable wings DO NOT HAVE outhauls, downhauls, booms with outhauls, or sail battens! NEVER advise adjusting outhaul or downhaul. ' +
+                '3. Wing foiling tuning consists strictly of: ' +
+                '   - Inflatable wing: inflation pressure (PSI) on the leading edge and strut (e.g. pump to full spec PSI for canopy rigidity in gusts, standard PSI for low-end grunt), harness line position, or wing size (m²). ' +
+                '   - Hydrofoil & board: foil mast position in the bottom twin US box tracks (slide forward 0.5-1 cm for early lift / light wind; slide back 0.5-1 cm for high-wind gust control), stabilizer shim angle (0° or -0.5° for high speed/control, +0.5° for early lift), and front wing area (cm²). ' +
+                'CHRONOLOGICAL SESSION CONTEXT & OUT-OF-SEQUENCE ANALYSIS: ' +
+                '4. Note `sessionNumber`, `totalSessions`, and `priorSessionsCount` in the payload. ' +
+                '   The user may analyze an older session out of chronological order (e.g. analyzing Session #4 when they currently have 40 sessions logged). ' +
+                '   Calibrate your tone, praise, and technical expectations strictly to their progression stage at THAT specific session number: ' +
+                '   - Sessions 1-5 (Novice): Celebrate first flights, taxi-to-foil pop-ups, pitch control, and board trim. Do not expect dry gybes. ' +
+                '   - Sessions 6-20 (Early Progression): Sustained flights, touch-and-go recovery, initial carving entries. ' +
+                '   - Sessions 21-50 (Intermediate): Dry foiling gybes, foot switches, building upwind VMG and swell glides. ' +
+                '   - Sessions 50+ (Advanced): High-speed carving, swell linking, tacks, efficiency. ' +
+                '5. If `recentAnalysis` or `priorRecentSessions` are provided, acknowledge how this session built upon their previous focus areas. ' +
                 'Provide a sharp, encouraging, highly specific 3-part debrief: ' +
-                '1) What Went Well (cite exact metrics from their session), ' +
-                '2) Tuning Recommendation (mast track position in cm, shim/stabilizer, or wing/foil sizing for the gust spread), ' +
-                '3) Technique Focus for Next Session (specific body mechanics, entry speed before gybe apex, or pumping cadence).';
+                '1) What Went Well (cite exact metrics from their session, celebrating milestones fitting their session number), ' +
+                '2) Tuning Recommendation (strictly wing foiling mechanics: wing PSI, foil mast track position in cm, stabilizer shim, or foil/wing sizing for the gust spread), ' +
+                '3) Technique Focus for Next Session (concrete drill matching their progression stage).';
         } else if (mode === 'game_plan') {
             model = 'gemini-3.5-flash-lite';
             schema = GAME_PLAN_JSON_SCHEMA;
             systemInstruction =
                 'You are an elite Wing Foil Coach giving a concise dockside pre-session briefing. ' +
-                'Synthesize the forecasted wind speed, gust spread, tide level, recommended quiver setup, and the rider past sessions at this spot into a 2-sentence briefing, a gear rigging tip, and a key focus.';
+                'CRITICAL EQUIPMENT RULES: ' +
+                '1. The sport is WING FOILING (handheld inflatable wing and hydrofoil board). ' +
+                '2. Inflatable wings DO NOT HAVE outhauls, downhauls, or sail battens! NEVER mention outhaul or downhaul. ' +
+                '3. Wing foiling rigging adjustments refer ONLY to: ' +
+                '   - Inflatable wing: inflation pressure (PSI) on the leading edge/strut (pump to full spec PSI for gust stiffness, standard PSI for light wind draft), harness lines, or wing size (m²). ' +
+                '   - Hydrofoil & board: foil mast track position in the US boxes (move forward 0.5-1 cm for light wind lift; move back 0.5-1 cm for gust control in high wind), and rear stabilizer shim angle. ' +
+                '4. RECENT SESSION CONTINUITY: ' +
+                '   - Check `recentSessionAnalysis` (the rider recent debrief, technique focus, tuning recommendation, and power tags). ' +
+                '   - Connect today game plan and water focus to the drill or lesson from their recent session. ' +
+                'Synthesize the forecasted wind speed, gust spread, tide level, recommended quiver setup, past sessions at this spot, and recent coaching focus into a 2-sentence briefing, a gear rigging tip (strictly wing foiling terms), and a key focus.';
         } else {
             return res.status(400).json({ error: `Unsupported mode: ${mode}` });
         }

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { subscribeToJournalEntries, updateJournalEntry } from '../services/journalService';
 import { analyzeSession, formatDurationSec } from '../services/foilAnalysisService';
 import { generateSessionCoachDebrief, extractSessionCoachTags } from '../services/aiCoachService';
-import { ArrowLeft, MapPin, Wind, Clock, Compass, Activity, Zap, Award, Sparkles, RefreshCw, CheckCircle2, Sliders, Target } from 'lucide-react';
+import { ArrowLeft, MapPin, Wind, Clock, Compass, Activity, Zap, Award, Sparkles, RefreshCw, CheckCircle2, Sliders, Target, History } from 'lucide-react';
 import { format } from 'date-fns';
 import { useAuth } from '../context/AuthContext';
 import { usePreferences } from '../context/PreferencesContext';
@@ -23,6 +23,7 @@ const SessionDetailPage = () => {
     const ktsToUnit = unit === 'kmh' ? 1.852 : 1;
 
     const [entry, setEntry] = useState(null);
+    const [allEntries, setAllEntries] = useState([]);
     const [analysis, setAnalysis] = useState(null);
     const [hoveredIndex, setHoveredIndex] = useState(null);
     const [selectedSegment, setSelectedSegment] = useState(null);
@@ -33,12 +34,14 @@ const SessionDetailPage = () => {
         let isMounted = true;
         const unsubscribe = subscribeToJournalEntries(user?.uid, (entries) => {
             if (!isMounted) return;
-            const found = (entries || []).find(e => String(e.id) === String(id));
+            const entryList = entries || [];
+            setAllEntries(entryList);
+            const found = entryList.find(e => String(e.id) === String(id));
             if (found) {
                 setEntry(found);
                 let a = found.foilAnalysis;
-                if (found.streams && (!a || !a.adaptiveProfile || !a.maneuvers || !a.efficiency)) {
-                    a = analyzeSession(found.streams, { windDirection: found.windDirection });
+                if (found.streams && (!a || !a.adaptiveProfile || !a.maneuvers || !a.efficiency || a.adaptiveProfile.foilArea === undefined)) {
+                    a = analyzeSession(found.streams, { windDirection: found.windDirection, gearUsed: found.gearUsed });
                 }
                 setAnalysis(a);
             }
@@ -49,13 +52,75 @@ const SessionDetailPage = () => {
         };
     }, [id, user?.uid, authLoading]);
 
+    // Chronological session ordering to accurately contextualize older & out-of-sequence sessions
+    const sortedEntries = React.useMemo(() => {
+        return [...allEntries].sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+    }, [allEntries]);
+
+    const sessionIndex = React.useMemo(() => {
+        return sortedEntries.findIndex(e => String(e.id) === String(id));
+    }, [sortedEntries, id]);
+
+    const sessionNumber = sessionIndex >= 0 ? sessionIndex + 1 : null;
+    const totalSessions = sortedEntries.length;
+
+    const getRiderStage = (num) => {
+        if (!num) return 'Foiling Progression';
+        if (num <= 5) return 'Novice • First Flights';
+        if (num <= 15) return 'Early Progression • Sustained Glides';
+        if (num <= 35) return 'Intermediate • Gybes & Transitions';
+        return 'Advanced • Dialed In';
+    };
+
+    const riderStage = sessionNumber ? getRiderStage(sessionNumber) : null;
+
+    const sessionContext = React.useMemo(() => {
+        if (sessionIndex < 0) return null;
+        const priorEntries = sortedEntries.slice(0, sessionIndex);
+        const priorCount = priorEntries.length;
+
+        // Find the most recent prior session (chronologically right before this one)
+        const lastPrior = priorCount > 0 ? priorEntries[priorCount - 1] : null;
+        let recentAnalysis = null;
+        if (lastPrior) {
+            recentAnalysis = {
+                date: lastPrior.date,
+                spot: lastPrior.locationName || lastPrior.locationId,
+                gearUsed: lastPrior.gearUsed,
+                percentFoil: lastPrior.foilAnalysis?.stats?.percentFoil || null,
+                notes: (lastPrior.notes || '').slice(0, 180),
+                coachDebrief: lastPrior.coachDebrief || null,
+                coachTags: lastPrior.coachTags || null
+            };
+        }
+
+        const priorRecentSessions = priorEntries.slice(-3).map(p => ({
+            date: p.date,
+            spot: p.locationName || p.locationId,
+            rating: p.rating,
+            windKts: p.windSpeed,
+            gearUsed: p.gearUsed,
+            percentFoil: p.foilAnalysis?.stats?.percentFoil || null,
+            breakthrough: p.coachTags?.breakthrough || null
+        }));
+
+        return {
+            sessionNumber,
+            totalSessions,
+            priorSessionsCount: priorCount,
+            riderStage,
+            priorRecentSessions,
+            recentAnalysis
+        };
+    }, [sortedEntries, sessionIndex, sessionNumber, totalSessions, riderStage]);
+
     const handleGenerateCoachDebrief = async () => {
         if (!entry || coachLoading) return;
         setCoachLoading(true);
         try {
             const [debrief, tags] = await Promise.all([
-                generateSessionCoachDebrief(entry, analysis),
-                entry.coachTags ? Promise.resolve(entry.coachTags) : extractSessionCoachTags(entry, analysis)
+                generateSessionCoachDebrief(entry, analysis, sessionContext),
+                entry.coachTags ? Promise.resolve(entry.coachTags) : extractSessionCoachTags(entry, analysis, sessionContext)
             ]);
 
             const updatedEntry = {
@@ -119,8 +184,39 @@ const SessionDetailPage = () => {
 
             {/* Session Header */}
             <div className="glass-panel" style={{ padding: '20px', marginBottom: '1.5rem' }}>
-                <div style={{ fontSize: '0.7rem', color: 'var(--accent-primary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <MapPin size={10} /> {entry.locationName || 'Unknown Location'}
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '6px' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--accent-primary)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <MapPin size={10} /> {entry.locationName || 'Unknown Location'}
+                    </div>
+                    {sessionNumber && (
+                        <span style={{
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            background: 'rgba(56, 189, 248, 0.15)',
+                            color: '#38bdf8',
+                            border: '1px solid rgba(56, 189, 248, 0.3)',
+                            padding: '2px 8px',
+                            borderRadius: '999px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                        }}>
+                            Session #{sessionNumber}{totalSessions > 0 ? ` of ${totalSessions}` : ''}
+                        </span>
+                    )}
+                    {riderStage && (
+                        <span style={{
+                            fontSize: '0.72rem',
+                            fontWeight: 600,
+                            background: 'rgba(167, 139, 250, 0.12)',
+                            color: '#c4b5fd',
+                            border: '1px solid rgba(167, 139, 250, 0.25)',
+                            padding: '2px 8px',
+                            borderRadius: '999px'
+                        }}>
+                            {riderStage}
+                        </span>
+                    )}
                 </div>
                 <h2 style={{ margin: '0 0 8px 0', fontSize: '1.5rem', fontWeight: 700 }}>
                     {format(new Date(entry.date), 'EEEE dd MMMM yyyy')}
@@ -218,13 +314,18 @@ const SessionDetailPage = () => {
             {/* ── Phase 5.2: Interactive AI Foil Coach Debrief Card ── */}
             <div className="glass-panel" style={{ padding: '18px', marginBottom: '1.5rem', border: '1px solid rgba(56, 189, 248, 0.35)', background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.85), rgba(30, 41, 59, 0.75))' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: coachDebrief ? '14px' : '6px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                         <Sparkles size={19} color="#38bdf8" />
                         <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700 }}>
                             AI Foil Coach Debrief
                         </h3>
+                        {sessionNumber && (
+                            <span style={{ fontSize: '0.72rem', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.25)', padding: '2px 8px', borderRadius: '999px', fontWeight: 600 }}>
+                                Session #{sessionNumber}
+                            </span>
+                        )}
                         {coachDebrief?.model && (
-                            <span style={{ fontSize: '0.68rem', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.25)', padding: '2px 8px', borderRadius: '999px' }}>
+                            <span style={{ fontSize: '0.68rem', color: '#94a3b8', background: 'rgba(255, 255, 255, 0.06)', border: '1px solid rgba(255, 255, 255, 0.12)', padding: '2px 8px', borderRadius: '999px' }}>
                                 {coachDebrief.model}
                             </span>
                         )}
@@ -253,6 +354,27 @@ const SessionDetailPage = () => {
                                 : 'Generate Coach Debrief'}
                     </button>
                 </div>
+
+                {/* Out of sequence / historical context notice */}
+                {sessionNumber && totalSessions > 1 && sessionNumber < totalSessions && (
+                    <div style={{
+                        fontSize: '0.75rem',
+                        color: 'var(--text-secondary)',
+                        background: 'rgba(0, 0, 0, 0.25)',
+                        border: '1px solid rgba(56, 189, 248, 0.25)',
+                        borderRadius: '6px',
+                        padding: '6px 10px',
+                        marginBottom: '12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                    }}>
+                        <History size={13} color="#38bdf8" />
+                        <span>
+                            Historical progression: Analysis calibrated to <strong>Session #{sessionNumber}</strong> ({riderStage}) with {sessionIndex} prior logged sessions.
+                        </span>
+                    </div>
+                )}
 
                 {!coachDebrief ? (
                     <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
