@@ -63,7 +63,7 @@ export const buildCompactSessionPayload = (entry, computedAnalysis = null, sessi
         gustKts: entry.windGusts ? Number(entry.windGusts) : null,
         windDirDeg: entry.windDirection ? Number(entry.windDirection) : null,
         gearUsed: entry.gearUsed || 'Unspecified gear',
-        notes: (entry.notes || '').slice(0, 600),
+        notes: (entry.notes || entry.commentary || entry.description || '').slice(0, 2500),
         telemetry: analysis.stats ? {
             topSpeedKts: Number(activityStats.topSpeed || stats.topSpeed || 0),
             avgFoilSpeedKts: Number(stats.avgFoilSpeed || 0),
@@ -210,6 +210,15 @@ export const buildDeterministicSessionDebrief = (payload) => {
         whatWentWellParts.push(`Continuity: Built upon prior session drill ("${prevShort}").`);
     }
 
+    const notesClean = (payload.notes || '').trim();
+    const notesLower = notesClean.toLowerCase();
+    if (notesClean) {
+        const firstSentence = notesClean.split(/[.!\n]/)[0].trim();
+        if (firstSentence) {
+            whatWentWellParts.push(`Your session commentary ("${firstSentence.slice(0, 90)}") aligns with your telemetry profile.`);
+        }
+    }
+
     let tuningRec = '';
     if (spread >= 7) {
         tuningRec = `With a ${spread.toFixed(0)} kt gust spread (${windStr}), slide your foil mast 0.5–1.0 cm back in the tracks to prevent over-foiling in peak gusts, pump leading edge & strut to full recommended PSI to prevent canopy distortion, and rely on your ${payload.gearUsed} glide to bridge lulls.`;
@@ -221,11 +230,22 @@ export const buildDeterministicSessionDebrief = (payload) => {
         tuningRec = `Your ${payload.gearUsed} setup delivered ${t.percentFoil}% foil time in ${windStr}; mark your current foil mast track position as your sweet-spot baseline for ${Math.round(payload.windKts || 16)} kt days.`;
     }
 
+    if (/mast|track|shim|position|front foot|back foot|pitch/i.test(notesLower)) {
+        tuningRec = `Addressing your rigging notes: ${tuningRec}`;
+    }
+
     let techniqueFocus = '';
     if (isNovice) {
         techniqueFocus = `Focus on committing your weight forward over the board centerline during acceleration, and avoid pulling back on the rear wing handle until the board is planing cleanly.`;
+    } else if (/switch|feet|foot switch|footwork/i.test(notesLower)) {
+        techniqueFocus = `Addressing your footwork commentary: carry 1–2 kts more entry speed into the glide and maintain foil flight speed above ${Math.max(8, (t.avgFoilSpeedKts - 2)).toFixed(1)} kts before initiating your foot switch so the board doesn't drop off foil.`;
+    } else if (/breach|breaching|high|over foil/i.test(notesLower)) {
+        techniqueFocus = `Addressing your foil height commentary: keep chest weight slightly over the front knee during speed bursts to prevent the front wing from breaching the surface.`;
     } else if (t.gybeAttempts > 0 && t.gybeCompletionPct < 65) {
         techniqueFocus = `Carry 1–2 kts more entry speed into the gybe apex and initiate your carve before depowering the wing so the foil stays pressurized above stall speed (${Math.max(8, (t.avgFoilSpeedKts - 3)).toFixed(1)} kts) through the foot switch.`;
+        if (/gybe|jibe|carve|turn/i.test(notesLower)) {
+            techniqueFocus = `Following up on your gybe commentary: ${techniqueFocus}`;
+        }
     } else if (t.portFoilSec != null && t.starboardFoilSec != null && (t.portFoilSec + t.starboardFoilSec) > 120) {
         const portPct = Math.round((t.portFoilSec / (t.portFoilSec + t.starboardFoilSec)) * 100);
         if (Math.abs(portPct - 50) >= 18) {

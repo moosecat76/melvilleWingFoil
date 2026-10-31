@@ -103,15 +103,15 @@ const DEBRIEF_JSON_SCHEMA = {
         },
         whatWentWell: {
             type: 'string',
-            description: 'Specific positive insights calibrated to the rider progression stage at this specific session number, referencing telemetry (flights, gybe %, speed, or HR efficiency) and notes.'
+            description: 'Specific positive insights calibrated to the rider progression stage at this specific session number, directly engaging with and validating the rider written commentary/self-analysis against telemetry (flights, gybe %, speed, or HR efficiency).'
         },
         tuningRecommendation: {
             type: 'string',
-            description: 'Actionable wing foiling gear advice (wing PSI, foil mast track position in cm, stabilizer shim, or wing/foil sizing). Inflatable wings have NO outhauls or downhauls — strictly use wing foiling mechanics.'
+            description: 'Actionable wing foiling gear advice (wing PSI, foil mast track position in cm, stabilizer shim, or wing/foil sizing), directly addressing any gear feedback, feel, or tuning experiments the rider described in their commentary. Inflatable wings have NO outhauls or downhauls.'
         },
         techniqueFocus: {
             type: 'string',
-            description: 'Concrete technique drill or focus appropriate for their progression stage at this session number (e.g. board trim/takeoff balance for early sessions, gybe apex speed or foot switch timing for intermediate/advanced).'
+            description: 'Concrete technique drill or focus appropriate for their progression stage, building directly upon the self-analysis, challenges, or breakthroughs mentioned in the rider commentary.'
         }
     },
     required: ['headline', 'whatWentWell', 'tuningRecommendation', 'techniqueFocus']
@@ -216,10 +216,16 @@ export default async function handler(req, res) {
                 '   - Sessions 21-50 (Intermediate): Dry foiling gybes, foot switches, building upwind VMG and swell glides. ' +
                 '   - Sessions 50+ (Advanced): High-speed carving, swell linking, tacks, efficiency. ' +
                 '5. If `recentAnalysis` or `priorRecentSessions` are provided, acknowledge how this session built upon their previous focus areas. ' +
+                'RIDER COMMENTARY & SELF-ANALYSIS (HIGH PRIORITY): ' +
+                '6. The rider frequently includes their own post-session analysis, sensations, tuning changes, and reflections in `notes`. ' +
+                '   Treat the rider commentary as first-class input: ' +
+                '   - Directly acknowledge, validate, and respond to their self-analysis in the debrief (e.g. "You noted feeling...", "As you observed in your commentary..."). ' +
+                '   - Reconcile their subjective feeling with their objective telemetry metrics (e.g. comparing what they felt in turns or gusts against speed, flight %, and HR). ' +
+                '   - Answer any questions, gear experiments, or technique struggles they reflected on. ' +
                 'Provide a sharp, encouraging, highly specific 3-part debrief: ' +
-                '1) What Went Well (cite exact metrics from their session, celebrating milestones fitting their session number), ' +
-                '2) Tuning Recommendation (strictly wing foiling mechanics: wing PSI, foil mast track position in cm, stabilizer shim, or foil/wing sizing for the gust spread), ' +
-                '3) Technique Focus for Next Session (concrete drill matching their progression stage).';
+                '1) What Went Well (cite exact metrics and validate the rider written self-analysis), ' +
+                '2) Tuning Recommendation (strictly wing foiling mechanics: wing PSI, foil mast track position in cm, stabilizer shim, or foil/wing sizing, addressing any gear feelings mentioned in their notes), ' +
+                '3) Technique Focus for Next Session (concrete drill directly tackling the focus areas from their self-analysis).';
         } else if (mode === 'game_plan') {
             model = 'gemini-3.5-flash-lite';
             schema = GAME_PLAN_JSON_SCHEMA;

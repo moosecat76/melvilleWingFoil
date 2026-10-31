@@ -70,8 +70,24 @@ describe('aiCoachService - Phase 5 AI Foil Coach', () => {
         expect(debrief.headline).toContain('68% Foil Time');
         expect(debrief.whatWentWell).toContain('6/8 foiling turns (75% dry completion)');
         expect(debrief.whatWentWell).toContain('138 bpm');
+        expect(debrief.whatWentWell).toContain('session commentary');
         expect(debrief.tuningRecommendation).toContain('gust spread');
         expect(debrief.techniqueFocus).toBeTruthy();
+    });
+
+    it('preserves and incorporates detailed rider post-analysis commentary in debrief', () => {
+        const longCommentary = 'After analyzing my flights, I felt the mast was slightly too far back causing rear leg fatigue during takeoff, but gybe carving felt stable. Need to work on foot switch timing.';
+        const entryWithCommentary = {
+            ...mockEntry,
+            notes: longCommentary
+        };
+        const payload = buildCompactSessionPayload(entryWithCommentary);
+        expect(payload.notes).toBe(longCommentary);
+
+        const debrief = buildDeterministicSessionDebrief(payload);
+        expect(debrief.whatWentWell).toContain('session commentary');
+        expect(debrief.tuningRecommendation).toContain('Addressing your rigging notes');
+        expect(debrief.techniqueFocus).toContain('Addressing your footwork commentary');
     });
 
     it('generates a pre-session Coach Game Plan synthesizing forecast, tide, gear, and past sessions', () => {
