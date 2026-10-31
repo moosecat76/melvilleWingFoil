@@ -176,4 +176,44 @@ describe('aiCoachService - Phase 5 AI Foil Coach', () => {
         expect(debrief.tuningRecommendation).toContain('Slide your foil mast 1.0–2.0 cm forward');
         expect(debrief.techniqueFocus).toContain('takeoff threshold');
     });
+
+    it('recovers longest flight from individual foilSegments when stats.longestFlightSec is 0 and reports short flights in seconds (e.g. 23s, not 0.0m)', () => {
+        const sessionWithSegments = {
+            id: 'sess-5apr',
+            date: '2026-04-05T10:00:00.000Z',
+            locationName: 'Melville Waters',
+            rating: 4,
+            windSpeed: 14,
+            windGusts: 18,
+            activityStats: {
+                topSpeed: 15.849201948
+            },
+            foilAnalysis: {
+                stats: {
+                    topSpeed: 15.8,
+                    longestFlightSec: 0,
+                    longestFlightFormatted: '0s',
+                    percentFoil: 8.5,
+                    totalFoilTime: 3.5,
+                    numberOfFlights: 3
+                },
+                foilSegments: [
+                    { flightNumber: 1, durationSec: 12, topSpeedKts: 13.4 },
+                    { flightNumber: 2, durationSec: 23, topSpeedKts: 15.849 },
+                    { flightNumber: 3, durationSec: 8, topSpeedKts: 12.1 }
+                ]
+            }
+        };
+
+        const payload = buildCompactSessionPayload(sessionWithSegments);
+        expect(payload.telemetry.longestFlightSec).toBe(23);
+        expect(payload.telemetry.topSpeedKts).toBe(15.85);
+
+        const debrief = buildDeterministicSessionDebrief(payload);
+        expect(debrief.whatWentWell).toContain('longest continuous flight of 23s');
+        expect(debrief.whatWentWell).not.toContain('0.0m');
+        expect(debrief.whatWentWell).not.toContain('0.0 min');
+        expect(debrief.whatWentWell).toContain('15.85 kts');
+        expect(debrief.headline).toContain('15.85 kts Peak Speed');
+    });
 });

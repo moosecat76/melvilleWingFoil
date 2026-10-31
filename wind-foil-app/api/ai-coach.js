@@ -103,7 +103,7 @@ const DEBRIEF_JSON_SCHEMA = {
         },
         whatWentWell: {
             type: 'string',
-            description: 'Specific positive insights calibrated to the rider progression stage at this specific session number, directly engaging with and validating the rider written commentary/self-analysis against telemetry (flights, gybe %, speed, or HR efficiency).'
+            description: 'Specific positive insights calibrated to the rider progression stage at this specific session number, directly engaging with and validating the rider written commentary/self-analysis against telemetry (flights, gybe %, speed, or HR efficiency). If flight durations are under 60 seconds, report them in seconds (e.g. 23s, never 0.0m or 0.0 min). Round all speeds to 2 decimal places.'
         },
         tuningRecommendation: {
             type: 'string',
@@ -228,6 +228,9 @@ export default async function handler(req, res) {
                 '     * Treat the session as a "Taxi & Takeoff Progression Session". ' +
                 '     * Explain the hydrodynamics: large boards create significant hull wetted suction and big foils have high displacement drag at 3-4 kts before reaching the ~6-7 kt takeoff threshold. ' +
                 '     * Advise sliding the foil mast 1-2 cm forward in the tracks to generate earlier low-speed pitch lift, pumping the wing to full spec PSI, and bearing away 15-20° off the wind to break hull suction. ' +
+                '8. METRIC FORMATTING RULES: ' +
+                '   - Flight durations: If the longest flight duration is under 60 seconds (or low), report it in seconds (e.g. "23s", "45s"). NEVER report flight duration as "0.0m" or "0.0 min"! ' +
+                '   - Speeds: Always format and round speed figures to 2 decimal places (e.g. "12.35 kts", never long floating point numbers). ' +
                 'Provide a sharp, encouraging, highly specific 3-part debrief: ' +
                 '1) What Went Well (cite exact metrics and validate the rider written self-analysis), ' +
                 '2) Tuning Recommendation (strictly wing foiling mechanics: wing PSI, foil mast track position in cm, stabilizer shim, or foil/wing sizing, addressing any gear feelings mentioned in their notes), ' +

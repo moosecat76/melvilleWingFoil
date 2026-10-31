@@ -916,8 +916,8 @@ export const analyzeSession = (streams, options = {}) => {
             distanceM: Math.round(distM),
             avgSpeedMs: Number(avgSpeedMs.toFixed(2)),
             maxSpeedMs: Number(maxSpeedMs.toFixed(2)),
-            avgSpeedKts: Number((avgSpeedMs * 1.94384).toFixed(1)),
-            topSpeedKts: Number((maxSpeedMs * 1.94384).toFixed(1)),
+            avgSpeedKts: Number((avgSpeedMs * 1.94384).toFixed(2)),
+            topSpeedKts: Number((maxSpeedMs * 1.94384).toFixed(2)),
             avgHeartRate: hrCount > 0 ? Math.round(hrSum / hrCount) : null,
         };
     });
@@ -972,8 +972,8 @@ export const analyzeSession = (streams, options = {}) => {
     const maxSpeedMs = validTopSpeeds.length > 0
         ? Math.max(...validTopSpeeds)
         : (velocityStream[0] || 0);
-    const topSpeedKts = (maxSpeedMs * 1.94384).toFixed(1);
-    const topSpeedMs = maxSpeedMs.toFixed(1);
+    const topSpeedKts = (maxSpeedMs * 1.94384).toFixed(2);
+    const topSpeedMs = maxSpeedMs.toFixed(2);
 
     let totalDistanceM = 0;
     for (let i = 1; i < timeStream.length; i++) {

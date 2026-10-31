@@ -604,7 +604,7 @@ const SessionsPage = () => {
                                         </div>
                                         <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                                             {newEntry.foilAnalysis?.stats ? (
-                                                `${newEntry.foilAnalysis.stats.totalDistance} km · ${newEntry.foilAnalysis.stats.topSpeed} kts top · ${newEntry.foilAnalysis.stats.percentFoil}% on foil`
+                                                `${newEntry.foilAnalysis.stats.totalDistance} km · ${parseFloat(newEntry.foilAnalysis.stats.topSpeed).toFixed(2)} kts top · ${newEntry.foilAnalysis.stats.percentFoil}% on foil`
                                             ) : (
                                                 'GPS track & stats loaded'
                                             )}
@@ -1093,7 +1093,7 @@ const SessionsPage = () => {
                                             {analysis && analysis.stats && (
                                                 <div style={{ display: 'flex', gap: '12px', marginTop: '6px', fontSize: '0.8rem', flexWrap: 'wrap' }}>
                                                     {(entry.activityStats?.topSpeed || analysis.stats?.topSpeed) && (
-                                                        <span style={{ color: 'var(--accent-primary)' }}><b>{entry.activityStats?.topSpeed || analysis.stats.topSpeed} kts</b> Top Speed</span>
+                                                        <span style={{ color: 'var(--accent-primary)' }}><b>{parseFloat(entry.activityStats?.topSpeed || analysis.stats.topSpeed).toFixed(2)} kts</b> Top Speed</span>
                                                     )}
                                                     {(entry.activityStats?.distance || analysis.stats?.totalDistance) && (
                                                         <span><b>{parseFloat(entry.activityStats?.distance || analysis.stats.totalDistance).toFixed(2)} km</b> Distance</span>

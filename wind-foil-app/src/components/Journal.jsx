@@ -457,7 +457,7 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                                                     <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
                                                         <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Top Speed</div>
                                                         <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--accent-primary)' }}>
-                                                            {newEntry.activityStats.topSpeed ? parseFloat(newEntry.activityStats.topSpeed).toFixed(1) : '–'} <span style={{ fontSize: '0.8rem' }}>kts</span>
+                                                            {newEntry.activityStats.topSpeed ? parseFloat(newEntry.activityStats.topSpeed).toFixed(2) : '–'} <span style={{ fontSize: '0.8rem' }}>kts</span>
                                                         </div>
                                                     </div>
                                                     <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
@@ -579,7 +579,7 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                                         <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
                                             <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Top Speed</div>
                                             <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--accent-primary)' }}>
-                                                {stats.topSpeed ? parseFloat(stats.topSpeed).toFixed(1) : '–'} <span style={{ fontSize: '0.8rem' }}>kts</span>
+                                                {stats.topSpeed ? parseFloat(stats.topSpeed).toFixed(2) : '–'} <span style={{ fontSize: '0.8rem' }}>kts</span>
                                             </div>
                                         </div>
                                         <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>

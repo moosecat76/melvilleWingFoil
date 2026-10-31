@@ -56,6 +56,31 @@ const SessionDetailPage = () => {
                         }
                     };
                 }
+                if (a?.stats) {
+                    const segMax = (a.foilSegments || []).reduce(
+                        (max, seg) => Math.max(max, Number(seg.durationSec) || 0),
+                        0
+                    );
+                    const currLongest = Number(a.stats.longestFlightSec) || 0;
+                    if (segMax > currLongest) {
+                        a = {
+                            ...a,
+                            stats: {
+                                ...a.stats,
+                                longestFlightSec: segMax,
+                                longestFlightFormatted: formatDurationSec(segMax)
+                            }
+                        };
+                    } else if (!a.stats.longestFlightFormatted && currLongest > 0) {
+                        a = {
+                            ...a,
+                            stats: {
+                                ...a.stats,
+                                longestFlightFormatted: formatDurationSec(currLongest)
+                            }
+                        };
+                    }
+                }
                 setAnalysis(a);
             }
         });
@@ -180,7 +205,7 @@ const SessionDetailPage = () => {
         if (ktsVal == null || ktsVal === '–') return '–';
         const num = parseFloat(ktsVal);
         if (isNaN(num)) return '–';
-        return (num * ktsToUnit).toFixed(1);
+        return (num * ktsToUnit).toFixed(2);
     };
 
     return (
@@ -452,7 +477,14 @@ const SessionDetailPage = () => {
                         <div style={{ background: 'rgba(0,0,0,0.3)', padding: '12px', borderRadius: '8px', textAlign: 'center' }}>
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Longest Flight</div>
                             <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#a78bfa' }}>
-                                {analysis.stats.longestFlightFormatted || formatDurationSec(analysis.stats.longestFlightSec || 0)}
+                                {(() => {
+                                    const segMax = (analysis.foilSegments || []).reduce(
+                                        (max, s) => Math.max(max, Number(s.durationSec) || 0),
+                                        0
+                                    );
+                                    const longestSec = Math.max(Number(analysis.stats?.longestFlightSec) || 0, segMax);
+                                    return longestSec > 0 ? formatDurationSec(longestSec) : (analysis.stats?.longestFlightFormatted || '0s');
+                                })()}
                             </div>
                         </div>
                         <div style={{ background: 'rgba(0,0,0,0.3)', padding: '12px', borderRadius: '8px', textAlign: 'center' }}>

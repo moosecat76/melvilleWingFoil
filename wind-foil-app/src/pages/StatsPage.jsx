@@ -191,7 +191,7 @@ const StatsPage = () => {
                     location: s.locationName || 'Spot',
                     percentFoil: Number(parseFloat(st.percentFoil || 0).toFixed(1)),
                     percentFoilMoving: st.percentFoilMoving ? Number(parseFloat(st.percentFoilMoving).toFixed(1)) : null,
-                    topSpeed: Number((topKts * ktsToUnit).toFixed(1)),
+                    topSpeed: Number((topKts * ktsToUnit).toFixed(2)),
                     foilMinutes: Number(parseFloat(st.totalFoilTime || 0).toFixed(1)),
                     longestFlightSec: longestSec,
                     gybeRate: m.completionRate != null ? m.completionRate : null,
@@ -325,7 +325,7 @@ const StatsPage = () => {
                             >
                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Top Speed</div>
                                 <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--accent-primary)', margin: '4px 0' }}>
-                                    {summary.bestTopSpeed.val > 0 ? `${(summary.bestTopSpeed.val * ktsToUnit).toFixed(1)} ${speedUnit}` : '—'}
+                                    {summary.bestTopSpeed.val > 0 ? `${(summary.bestTopSpeed.val * ktsToUnit).toFixed(2)} ${speedUnit}` : '—'}
                                 </div>
                                 {summary.bestTopSpeed.entry && (
                                     <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>

@@ -67,13 +67,17 @@ export const buildCompactSessionPayload = (entry, computedAnalysis = null, sessi
         gearUsed: entry.gearUsed || 'Unspecified gear',
         notes: (entry.notes || entry.commentary || entry.description || '').slice(0, 2500),
         telemetry: analysis.stats ? {
-            topSpeedKts: Number(activityStats.topSpeed || stats.topSpeed || 0),
-            avgFoilSpeedKts: Number(stats.avgFoilSpeed || 0),
+            topSpeedKts: Number(Number(activityStats.topSpeed || stats.topSpeed || 0).toFixed(2)),
+            avgFoilSpeedKts: Number(Number(stats.avgFoilSpeed || 0).toFixed(2)),
             percentFoil: Number(stats.percentFoil || 0),
             totalFoilMin: Number(stats.totalFoilTime || 0),
-            flightsCount: Number(stats.numberOfFlights || 0),
-            longestFlightSec: Number(stats.longestFlightSec || 0),
-            distanceKm: Number(activityStats.distance || stats.totalDistance || 0),
+            flightsCount: Number(stats.numberOfFlights || (analysis.foilSegments || []).length || 0),
+            longestFlightSec: Math.max(
+                Number(stats.longestFlightSec || 0),
+                ...(analysis.foilSegments || []).map(s => Number(s.durationSec) || 0),
+                0
+            ),
+            distanceKm: Number(Number(activityStats.distance || stats.totalDistance || 0).toFixed(2)),
             gybeAttempts: maneuvers.totalAttempts ?? 0,
             gybesCompleted: maneuvers.completedTurns ?? 0,
             gybeCompletionPct: maneuvers.completionRate ?? null,
@@ -195,16 +199,24 @@ export const buildDeterministicSessionDebrief = (payload) => {
     // With full telemetry
     const noFoilClaimed = isNoFoilExplicitlyStated(payload.notes);
     const isZeroFoil = Number(t.percentFoil || 0) === 0 || t.flightsCount === 0 || noFoilClaimed;
+    const topSpeedStr = Number(t.topSpeedKts || 0).toFixed(2);
+
+    const formatFlightDurationDebrief = (sec) => {
+        const s = Math.round(Number(sec) || 0);
+        if (s <= 0) return '0s';
+        if (s < 60) return `${s}s`;
+        return `${(s / 60).toFixed(1)} min`;
+    };
 
     if (isZeroFoil) {
-        const headline = `${sessionPrefix}Takeoff & Taxi Session at ${payload.spot} (Top Speed ${t.topSpeedKts} kts)`;
+        const headline = `${sessionPrefix}Takeoff & Taxi Session at ${payload.spot} (Top Speed ${topSpeedStr} kts)`;
         const whatWentWell = noFoilClaimed
-            ? `As noted in your session commentary, you didn't get up on foil today despite pushing board speed to ${t.topSpeedKts} kts. Working through the displacement taxi phase on ${payload.gearUsed} is essential muscle memory for learning board balance and finding your stance.`
-            : `Logged a dedicated taxi and takeoff practice session on ${payload.gearUsed}, reaching ${t.topSpeedKts} kts across ${t.distanceKm} km.`;
+            ? `As noted in your session commentary, you didn't get up on foil today despite pushing board speed to ${topSpeedStr} kts. Working through the displacement taxi phase on ${payload.gearUsed} is essential muscle memory for learning board balance and finding your stance.`
+            : `Logged a dedicated taxi and takeoff practice session on ${payload.gearUsed}, reaching ${topSpeedStr} kts across ${t.distanceKm} km.`;
 
         const tuningRecommendation = `A larger board has substantial surface area and hull suction that can feel sticky at 3–4 kts before lifting off. Slide your foil mast 1.0–2.0 cm forward in the tracks to generate earlier low-speed pitch lift, and pump your wing to full factory PSI for maximum canopy tension.`;
 
-        const techniqueFocus = `At ${t.topSpeedKts} kts you were approaching the ~5.5–6.5 kt takeoff threshold. Bear away 15°–20° off the wind to let the board accelerate through the hull drag hump before pumping, and avoid leaning back on the tail which sinks the board and creates water drag.`;
+        const techniqueFocus = `At ${topSpeedStr} kts you were approaching the ~5.5–6.5 kt takeoff threshold. Bear away 15°–20° off the wind to let the board accelerate through the hull drag hump before pumping, and avoid leaning back on the tail which sinks the board and creates water drag.`;
 
         return {
             headline,
@@ -219,13 +231,13 @@ export const buildDeterministicSessionDebrief = (payload) => {
         };
     }
 
-    const longestMin = (t.longestFlightSec / 60).toFixed(1);
+    const flightDurStr = formatFlightDurationDebrief(t.longestFlightSec);
     const whatWentWellParts = [];
     if (isNovice) {
         whatWentWellParts.push(`At Session #${payload.sessionNumber} (${payload.riderStage || 'Novice stage'}), you're building foundational flight control!`);
     }
     whatWentWellParts.push(
-        `You spent ${t.percentFoil}% of the session on foil (${t.totalFoilMin} min across ${t.flightsCount} flights) with a top speed of ${t.topSpeedKts} kts and a longest continuous flight of ${longestMin} min.`
+        `You spent ${t.percentFoil}% of the session on foil (${t.totalFoilMin} min across ${t.flightsCount} flights) with a top speed of ${topSpeedStr} kts and a longest continuous flight of ${flightDurStr}.`
     );
     if (t.gybeAttempts > 0) {
         whatWentWellParts.push(`You completed ${t.gybesCompleted}/${t.gybeAttempts} foiling turns (${t.gybeCompletionPct}% dry completion).`);
@@ -253,7 +265,7 @@ export const buildDeterministicSessionDebrief = (payload) => {
     } else if (t.takeoffConversionPct != null && t.takeoffConversionPct < 60) {
         tuningRec = `Your takeoff conversion was ${t.takeoffConversionPct}%: try shifting your foil mast 0.5 cm forward in the tracks or adding +0.5° stabilizer shim to generate earlier low-end lift during speed surges.`;
     } else if (t.topSpeedKts >= 18) {
-        tuningRec = `Hitting ${t.topSpeedKts} kts shows strong top-end pace on ${payload.gearUsed}; a slightly flatter (0° or -0.5°) rear stabilizer shim will reduce drag and unlock another 1–2 kts of glide speed.`;
+        tuningRec = `Hitting ${topSpeedStr} kts shows strong top-end pace on ${payload.gearUsed}; a slightly flatter (0° or -0.5°) rear stabilizer shim will reduce drag and unlock another 1–2 kts of glide speed.`;
     } else {
         tuningRec = `Your ${payload.gearUsed} setup delivered ${t.percentFoil}% foil time in ${windStr}; mark your current foil mast track position as your sweet-spot baseline for ${Math.round(payload.windKts || 16)} kt days.`;
     }
@@ -266,11 +278,11 @@ export const buildDeterministicSessionDebrief = (payload) => {
     if (isNovice) {
         techniqueFocus = `Focus on committing your weight forward over the board centerline during acceleration, and avoid pulling back on the rear wing handle until the board is planing cleanly.`;
     } else if (/switch|feet|foot switch|footwork/i.test(notesLower)) {
-        techniqueFocus = `Addressing your footwork commentary: carry 1–2 kts more entry speed into the glide and maintain foil flight speed above ${Math.max(8, (t.avgFoilSpeedKts - 2)).toFixed(1)} kts before initiating your foot switch so the board doesn't drop off foil.`;
+        techniqueFocus = `Addressing your footwork commentary: carry 1–2 kts more entry speed into the glide and maintain foil flight speed above ${Math.max(8, (t.avgFoilSpeedKts - 2)).toFixed(2)} kts before initiating your foot switch so the board doesn't drop off foil.`;
     } else if (/breach|breaching|high|over foil/i.test(notesLower)) {
         techniqueFocus = `Addressing your foil height commentary: keep chest weight slightly over the front knee during speed bursts to prevent the front wing from breaching the surface.`;
     } else if (t.gybeAttempts > 0 && t.gybeCompletionPct < 65) {
-        techniqueFocus = `Carry 1–2 kts more entry speed into the gybe apex and initiate your carve before depowering the wing so the foil stays pressurized above stall speed (${Math.max(8, (t.avgFoilSpeedKts - 3)).toFixed(1)} kts) through the foot switch.`;
+        techniqueFocus = `Carry 1–2 kts more entry speed into the gybe apex and initiate your carve before depowering the wing so the foil stays pressurized above stall speed (${Math.max(8, (t.avgFoilSpeedKts - 3)).toFixed(2)} kts) through the foot switch.`;
         if (/gybe|jibe|carve|turn/i.test(notesLower)) {
             techniqueFocus = `Following up on your gybe commentary: ${techniqueFocus}`;
         }
@@ -285,12 +297,15 @@ export const buildDeterministicSessionDebrief = (payload) => {
         if (t.enduranceDeltaPct != null && t.enduranceDeltaPct <= -12) {
             techniqueFocus = `Foil time dropped ${Math.abs(t.enduranceDeltaPct)}% in the second half of the session—lock your harness/front arm straight on upwind reaches to conserve upper-body energy for late-session transitions.`;
         } else {
-            techniqueFocus = `Focus on linking consecutive swells on downwind glides while feathering the wing neutral to extend your longest flight past ${(t.longestFlightSec / 60 + 1).toFixed(1)} minutes.`;
+            const nextTarget = t.longestFlightSec < 60
+                ? `${Math.max(30, Math.round(t.longestFlightSec + 15))}s`
+                : `${(t.longestFlightSec / 60 + 1).toFixed(1)} minutes`;
+            techniqueFocus = `Focus on linking consecutive swells on downwind glides while feathering the wing neutral to extend your longest flight past ${nextTarget}.`;
         }
     }
 
     return {
-        headline: `${sessionPrefix}${t.percentFoil}% Foil Time & ${t.topSpeedKts} kts Peak Speed at ${payload.spot}`,
+        headline: `${sessionPrefix}${t.percentFoil}% Foil Time & ${topSpeedStr} kts Peak Speed at ${payload.spot}`,
         sessionNumber: payload.sessionNumber || null,
         riderStage: payload.riderStage || null,
         whatWentWell: whatWentWellParts.join(' '),

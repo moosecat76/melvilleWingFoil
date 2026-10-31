@@ -28,7 +28,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebaseSetup';
 import { encodePolyline, decodePolyline } from './tcxService';
-import { analyzeSession } from './foilAnalysisService';
+import { analyzeSession, formatDurationSec } from './foilAnalysisService';
 
 /**
  * Normalizes an entry's date field (ISO string, Firestore Timestamp, epoch ms, or activityStats.startTime)
@@ -212,6 +212,21 @@ export const hydrateJournalEntry = (entry) => {
         hydrated.foilAnalysis.stats.percentFoilMoving = hydrated.foilAnalysis.stats.percentFoil;
         if (durationMin > 0 && rawFoilMin >= 0) {
             hydrated.foilAnalysis.stats.percentFoil = Math.min(100, Number(((rawFoilMin / durationMin) * 100).toFixed(1))).toFixed(1);
+        }
+    }
+
+    // Historical fallback: heal longestFlightSec if foilSegments exists with flights but longestFlightSec is 0 or missing
+    if (hydrated.foilAnalysis?.stats) {
+        const segMax = (hydrated.foilAnalysis.foilSegments || []).reduce(
+            (max, seg) => Math.max(max, Number(seg.durationSec) || 0),
+            0
+        );
+        const currLongest = Number(hydrated.foilAnalysis.stats.longestFlightSec) || 0;
+        if (segMax > currLongest) {
+            hydrated.foilAnalysis.stats.longestFlightSec = segMax;
+            hydrated.foilAnalysis.stats.longestFlightFormatted = formatDurationSec(segMax);
+        } else if (!hydrated.foilAnalysis.stats.longestFlightFormatted && currLongest > 0) {
+            hydrated.foilAnalysis.stats.longestFlightFormatted = formatDurationSec(currLongest);
         }
     }
 

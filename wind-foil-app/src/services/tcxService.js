@@ -177,8 +177,8 @@ const buildResult = (rawPoints) => {
         const totalDistM = rawPoints[rawPoints.length - 1].distanceM || 0;
 
         activityStats = {
-            topSpeed:     (maxSpeedMs * 1.94384).toFixed(1),
-            avgSpeed:     (avgSpeedMs * 1.94384).toFixed(1),
+            topSpeed:     (maxSpeedMs * 1.94384).toFixed(2),
+            avgSpeed:     (avgSpeedMs * 1.94384).toFixed(2),
             distance:     (totalDistM / 1000).toFixed(2),
             duration:     (durationMs / 60000).toFixed(1),
             startTime:    new Date(startMs),
