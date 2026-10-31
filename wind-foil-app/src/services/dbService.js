@@ -23,6 +23,7 @@ import {
     query,
     where,
     orderBy,
+    onSnapshot,
     serverTimestamp,
 } from 'firebase/firestore';
 import { db } from './firebaseSetup';
@@ -208,14 +209,17 @@ export const hydrateJournalEntry = (entry) => {
 
 /**
  * Checks if two journal entries refer to the same logged session.
- * Matches on id, or on identical normalized date + notes.
+ * Matches on id, or on identical normalized date + notes (+ locationId if both specify it).
  */
 export const isSameJournalEntry = (a, b) => {
     if (!a || !b) return false;
     if (a.id && b.id && String(a.id) === String(b.id)) return true;
     const dateA = normalizeEntryDate(a) || a.date;
     const dateB = normalizeEntryDate(b) || b.date;
-    return !!(dateA && dateB && dateA === dateB && (a.notes || '').trim() === (b.notes || '').trim());
+    if (!dateA || !dateB || dateA !== dateB) return false;
+    if ((a.notes || '').trim() !== (b.notes || '').trim()) return false;
+    if (a.locationId && b.locationId && a.locationId !== b.locationId) return false;
+    return true;
 };
 
 /**
@@ -256,6 +260,38 @@ export const getJournalEntries = async (uid) => {
         const tB = new Date(b.date || 0).getTime() || 0;
         return tB - tA;
     });
+};
+
+/**
+ * Real-time subscription to a user's journal entries in Firestore.
+ * Immediately invokes `onEntries(sortedEntries)` whenever any device adds, edits, or removes a session.
+ */
+export const subscribeToJournalEntries = (uid, onEntries, onError = null) => {
+    if (!uid || typeof onSnapshot !== 'function') return () => {};
+    return onSnapshot(
+        journalCol(uid),
+        (snap) => {
+            const entries = [];
+            for (const d of snap.docs) {
+                try {
+                    entries.push(hydrateJournalEntry({ id: d.id, ...d.data() }));
+                } catch (e) {
+                    console.warn('[DB] Failed to hydrate journal entry in snapshot:', d.id, e);
+                    entries.push({ id: d.id, ...d.data() });
+                }
+            }
+            entries.sort((a, b) => {
+                const tA = new Date(a.date || 0).getTime() || 0;
+                const tB = new Date(b.date || 0).getTime() || 0;
+                return tB - tA;
+            });
+            onEntries(entries);
+        },
+        (err) => {
+            console.warn('[DB] Journal entries real-time subscription error:', err);
+            if (typeof onError === 'function') onError(err);
+        }
+    );
 };
 
 export const addJournalEntry = async (uid, entry) => {
@@ -300,6 +336,21 @@ export const saveUserGear = async (uid, gearItems) => {
     await setDoc(gearDoc(uid), { items: gearItems }, { merge: true });
 };
 
+export const subscribeToUserGear = (uid, onGear, onError = null) => {
+    if (!uid || typeof onSnapshot !== 'function') return () => {};
+    return onSnapshot(
+        gearDoc(uid),
+        (snap) => {
+            const items = snap.exists() ? snap.data().items || [] : [];
+            onGear(items);
+        },
+        (err) => {
+            console.warn('[DB] User gear real-time subscription error:', err);
+            if (typeof onError === 'function') onError(err);
+        }
+    );
+};
+
 // ─── Locations ──────────────────────────────────────
 const locDoc = (uid) => doc(db, 'users', uid, 'settings', 'locations');
 
@@ -319,6 +370,28 @@ export const getCurrentLocationId = async (uid) => {
 
 export const saveCurrentLocationId = async (uid, locationId) => {
     await setDoc(locDoc(uid), { currentId: locationId }, { merge: true });
+};
+
+export const subscribeToUserLocations = (uid, onLocationsData, onError = null) => {
+    if (!uid || typeof onSnapshot !== 'function') return () => {};
+    return onSnapshot(
+        locDoc(uid),
+        (snap) => {
+            if (!snap.exists()) {
+                onLocationsData({ items: null, currentId: null });
+                return;
+            }
+            const data = snap.data() || {};
+            onLocationsData({
+                items: data.items || [],
+                currentId: data.currentId || null,
+            });
+        },
+        (err) => {
+            console.warn('[DB] User locations real-time subscription error:', err);
+            if (typeof onError === 'function') onError(err);
+        }
+    );
 };
 
 // ─── Google Health Tokens (per-user) ─────────────────
@@ -362,37 +435,61 @@ export const migrateLocalStorageToFirestore = async (uid) => {
             try {
                 existing = await getJournalEntries(uid);
             } catch (e) {
-                console.warn('Could not fetch existing journal entries. Will push blindly.', e);
+                console.warn('Could not fetch existing journal entries. Skipping blind push.', e);
+                existing = null;
             }
 
-            const entries = JSON.parse(localJournal);
-            let added = 0;
-            for (const entry of entries) {
-                const isDuplicate = existing.some(e => e.date === entry.date && e.notes === entry.notes);
-                if (!isDuplicate) {
-                    const prepared = prepareJournalEntryForFirestore(entry);
-                    try {
-                        await addDoc(journalCol(uid), prepared);
-                        added++;
-                    } catch (err) {
-                        console.error('Failed to migrate journal entry:', entry.date, err.code, err.message);
+            if (existing !== null) {
+                const entries = JSON.parse(localJournal);
+                let added = 0;
+                const updatedLocal = [];
+                for (const entry of Array.isArray(entries) ? entries : []) {
+                    const matchedCloud = existing.find(e => isSameJournalEntry(e, entry));
+                    if (!matchedCloud) {
+                        const prepared = prepareJournalEntryForFirestore(entry);
+                        delete prepared.createdAt;
+                        delete prepared.updatedAt;
+                        try {
+                            const ref = await addDoc(journalCol(uid), { ...prepared, createdAt: serverTimestamp() });
+                            const syncedEntry = { ...entry, id: ref.id, ...prepared };
+                            existing.push(syncedEntry);
+                            updatedLocal.push(syncedEntry);
+                            added++;
+                        } catch (err) {
+                            console.error('Failed to migrate journal entry:', entry.date, err.code, err.message);
+                            updatedLocal.push(entry);
+                        }
+                    } else {
+                        updatedLocal.push({ ...entry, id: matchedCloud.id });
                     }
                 }
+                if (added > 0) {
+                    console.log(`Migrated ${added} journal entries to Firestore`);
+                    try {
+                        localStorage.setItem('wind_foil_journal_entries', JSON.stringify(updatedLocal));
+                    } catch (_) { /* ignore quota errors */ }
+                }
             }
-            if (added > 0) console.log(`Migrated ${added} journal entries to Firestore`);
         }
     } catch (e) {
         console.error('Critical error in Journal Migration', e);
     }
 
-    // 2. Gear
+    // 2. Gear — union cloud + local so new gear on mobile or desktop is never lost
     try {
-        const localGear = localStorage.getItem('melvill_user_gear');
-        if (localGear) {
-            const cloudGear = await getUserGear(uid);
-            if (!cloudGear || cloudGear.length === 0) {
-                await saveUserGear(uid, JSON.parse(localGear));
-                console.log('Migrated gear to Firestore');
+        const localGearRaw = localStorage.getItem('melvill_user_gear');
+        if (localGearRaw) {
+            const localGear = JSON.parse(localGearRaw);
+            if (Array.isArray(localGear) && localGear.length > 0) {
+                const cloudGear = await getUserGear(uid);
+                const mergedGear = mergeItemLists(cloudGear || [], localGear);
+                if (mergedGear.length !== (cloudGear || []).length) {
+                    await saveUserGear(uid, mergedGear);
+                    console.log('Merged local gear into Firestore');
+                }
+                try {
+                    localStorage.setItem('melvill_user_gear', JSON.stringify(mergedGear));
+                } catch (_) { /* ignore */ }
             }
         }
     } catch (e) {
@@ -414,8 +511,6 @@ export const migrateLocalStorageToFirestore = async (uid) => {
     } catch (e) {
         console.error('Locations migration failed', e);
     }
-
-    
 };
 
 // ─── Restore backup directly to Firestore ────────────

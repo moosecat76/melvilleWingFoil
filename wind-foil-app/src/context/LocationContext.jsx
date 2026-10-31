@@ -5,6 +5,7 @@ import {
     saveUserLocations,
     getCurrentLocationId,
     saveCurrentLocationId,
+    subscribeToUserLocations,
     mergeItemLists
 } from '../services/dbService';
 
@@ -96,59 +97,79 @@ export const LocationProvider = ({ children }) => {
     // Track whether initial cloud sync has completed for this user session
     const syncCompletedForUid = useRef(null);
 
-    // Synchronize cloud + local storage when auth state is resolved
+    // Synchronize cloud + local storage when auth state is resolved, with real-time listener
     useEffect(() => {
         if (authLoading) return;
 
-        const syncLocations = async () => {
-            const currentUid = user?.uid || null;
+        let isMounted = true;
+        let unsubscribe = () => {};
+        const currentUid = user?.uid || null;
 
-            if (currentUid) {
-                try {
-                    const [remoteLocations, remoteCurrentId] = await Promise.all([
-                        getUserLocations(currentUid),
-                        getCurrentLocationId(currentUid)
-                    ]);
-
+        if (currentUid) {
+            unsubscribe = subscribeToUserLocations(
+                currentUid,
+                async ({ items: remoteLocations, currentId: remoteCurrentId }) => {
+                    if (!isMounted) return;
                     const localLocs = getStoredLocations();
-                    // Merge remote + local so no location from either source is lost
                     const merged = mergeItemLists(remoteLocations || [], localLocs).map(sanitizeLocation);
                     const hasMelville = merged.some(l => l.id === 'melville');
                     const finalList = hasMelville ? merged : [DEFAULT_LOCATION, ...merged];
 
-                    // Determine active location
                     const targetId = remoteCurrentId || localStorage.getItem('currentLocationId') || 'melville';
                     const activeLoc = finalList.find(l => l.id === targetId && isValidCoordinates(l.latitude, l.longitude))
                         || finalList.find(l => isValidCoordinates(l.latitude, l.longitude))
                         || DEFAULT_LOCATION;
 
-                    // Update local storage
-                    localStorage.setItem('locations', JSON.stringify(finalList));
-                    localStorage.setItem('currentLocationId', activeLoc.id);
+                    try {
+                        localStorage.setItem('locations', JSON.stringify(finalList));
+                        localStorage.setItem('currentLocationId', activeLoc.id);
+                    } catch (_) { /* ignore */ }
 
-                    // Update cloud database
-                    await Promise.all([
-                        saveUserLocations(currentUid, finalList),
-                        saveCurrentLocationId(currentUid, activeLoc.id)
-                    ]);
+                    // If local had locations not yet in cloud, push the merged list once
+                    if (!remoteLocations || finalList.length > remoteLocations.length) {
+                        saveUserLocations(currentUid, finalList).catch(() => {});
+                    }
+                    if (!remoteCurrentId) {
+                        saveCurrentLocationId(currentUid, activeLoc.id).catch(() => {});
+                    }
 
                     setLocations(finalList);
                     setCurrentLocation(activeLoc);
                     syncCompletedForUid.current = currentUid;
-                } catch (err) {
-                    console.warn('[LocationContext] Cloud sync failed, using local locations:', err);
+                },
+                async (err) => {
+                    console.warn('[LocationContext] Cloud subscription fallback:', err);
+                    try {
+                        const [remoteLocations, remoteCurrentId] = await Promise.all([
+                            getUserLocations(currentUid),
+                            getCurrentLocationId(currentUid)
+                        ]);
+                        if (!isMounted) return;
+                        const localLocs = getStoredLocations();
+                        const merged = mergeItemLists(remoteLocations || [], localLocs).map(sanitizeLocation);
+                        const hasMelville = merged.some(l => l.id === 'melville');
+                        const finalList = hasMelville ? merged : [DEFAULT_LOCATION, ...merged];
+                        const targetId = remoteCurrentId || localStorage.getItem('currentLocationId') || 'melville';
+                        const activeLoc = finalList.find(l => l.id === targetId && isValidCoordinates(l.latitude, l.longitude))
+                            || DEFAULT_LOCATION;
+                        setLocations(finalList);
+                        setCurrentLocation(activeLoc);
+                    } catch (_) { /* ignore */ }
                 }
-            } else {
-                // Logged out: ensure local state matches localStorage
-                const localLocs = getStoredLocations();
-                const activeLoc = getStoredCurrentLocation(localLocs);
-                setLocations(localLocs);
-                setCurrentLocation(activeLoc);
-                syncCompletedForUid.current = null;
-            }
-        };
+            );
+        } else {
+            // Logged out: ensure local state matches localStorage
+            const localLocs = getStoredLocations();
+            const activeLoc = getStoredCurrentLocation(localLocs);
+            setLocations(localLocs);
+            setCurrentLocation(activeLoc);
+            syncCompletedForUid.current = null;
+        }
 
-        syncLocations();
+        return () => {
+            isMounted = false;
+            if (typeof unsubscribe === 'function') unsubscribe();
+        };
     }, [user?.uid, authLoading]);
 
     // Helper to persist both to localStorage and Firestore

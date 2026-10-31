@@ -14,11 +14,11 @@ import GearSelector from '../components/GearSelector';
 import LocationManager from '../components/LocationManager';
 import BestTime from '../components/BestTime';
 import SimilarSessionsCard from '../components/SimilarSessionsCard';
-import { getJournalEntries } from '../services/journalService';
+import { getJournalEntries, subscribeToJournalEntries } from '../services/journalService';
 import { getStoredGeminiKey, setStoredGeminiKey } from '../services/aiCoachService';
 import { exportData, importData } from '../services/storageService';
 import { initiateGoogleFitAuth, handleGoogleFitCallback, getGoogleFitUserAsync, disconnectGoogleFit, isValidGoogleFitOAuthState } from '../services/googleFitService';
-import { saveUserGear } from '../services/dbService';
+import { saveUserGear, subscribeToUserGear, getUserGear } from '../services/dbService';
 import { Download, Upload, Database, Wifi, Sparkles } from 'lucide-react';
 
 const CustomArrowDot = (props) => {
@@ -45,7 +45,7 @@ const CustomArrowDot = (props) => {
 };
 
 const ForecastPage = () => {
-    const { currentLocation, resetToDefaultLocation } = useLocation();
+    const { locations, currentLocation, switchLocation, resetToDefaultLocation } = useLocation();
     const { user, login, logout, loading: authLoading } = useAuth();
     const { unit, setUnit, unitLabel, formatSpeedFromKmh } = usePreferences();
     const { showToast } = useToast();
@@ -60,6 +60,7 @@ const ForecastPage = () => {
     const [current, setCurrent] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [allLocationForecasts, setAllLocationForecasts] = useState([]);
 
     // Responsive Forecast Horizon: 3 days on mobile (<= 768px), 7 days on other views
     const [forecastDays, setForecastDays] = useState(() => {
@@ -84,35 +85,53 @@ const ForecastPage = () => {
         }
     }, []);
 
-    // Gear & Historical Sessions State
+    // Gear & Historical Sessions State (real-time synced across devices)
     const [userGear, setUserGear] = useState([]);
     const [userSessions, setUserSessions] = useState([]);
     useEffect(() => {
         if (authLoading) return;
-        const fetchGearAndSessions = async () => {
-            if (user?.uid) {
-                const { getUserGear } = await import('../services/dbService');
-                const gear = await getUserGear(user.uid);
-                setUserGear(gear);
-            } else {
-                setUserGear(JSON.parse(localStorage.getItem('melvill_user_gear') || '[]'));
-            }
+        let isMounted = true;
+
+        const unsubscribeEntries = subscribeToJournalEntries(user?.uid, (entries) => {
+            if (isMounted) setUserSessions(entries || []);
+        });
+
+        let unsubscribeGear = () => {};
+        if (user?.uid) {
+            unsubscribeGear = subscribeToUserGear(
+                user.uid,
+                (gear) => {
+                    if (isMounted) setUserGear(gear || []);
+                },
+                async () => {
+                    try {
+                        const gear = await getUserGear(user.uid);
+                        if (isMounted) setUserGear(gear || []);
+                    } catch (_) { /* ignore */ }
+                }
+            );
+        } else {
             try {
-                const entries = await getJournalEntries(user?.uid);
-                setUserSessions(entries || []);
-            } catch (e) {
-                console.warn('[ForecastPage] Failed to load journal entries:', e);
+                setUserGear(JSON.parse(localStorage.getItem('melvill_user_gear') || '[]'));
+            } catch {
+                setUserGear([]);
             }
+        }
+
+        return () => {
+            isMounted = false;
+            if (typeof unsubscribeEntries === 'function') unsubscribeEntries();
+            if (typeof unsubscribeGear === 'function') unsubscribeGear();
         };
-        fetchGearAndSessions();
     }, [user?.uid, authLoading]);
 
     const handleSaveGear = async (items) => {
         setUserGear(items);
+        try {
+            localStorage.setItem('melvill_user_gear', JSON.stringify(items));
+        } catch (_) { /* ignore */ }
         if (user?.uid) {
             await saveUserGear(user.uid, items);
-        } else {
-            localStorage.setItem('melvill_user_gear', JSON.stringify(items));
         }
         showToast('Quiver saved successfully', 'success');
     };
@@ -166,6 +185,36 @@ const ForecastPage = () => {
         fetchData();
         return () => { isMounted = false; };
     }, [currentLocation]);
+
+    // Fetch forecasts across all saved locations so "Best Time & Location to Go" can recommend the best spot
+    useEffect(() => {
+        if (!Array.isArray(locations) || locations.length === 0) return;
+        let isMounted = true;
+
+        const fetchMultiSpotForecasts = async () => {
+            const results = await Promise.all(
+                locations.map(async (loc) => {
+                    if (loc.id === currentLocation.id && data && data.length > 0) {
+                        return { location: loc, hourlyForecast: data, dailyData: daily };
+                    }
+                    try {
+                        const raw = await getWeatherForecast(loc.latitude, loc.longitude);
+                        const processed = processChartData(raw, null);
+                        return { location: loc, hourlyForecast: processed, dailyData: raw.daily };
+                    } catch (e) {
+                        console.warn(`[ForecastPage] Could not fetch multi-spot forecast for ${loc.name}:`, e);
+                        return null;
+                    }
+                })
+            );
+            if (isMounted) {
+                setAllLocationForecasts(results.filter(Boolean));
+            }
+        };
+
+        fetchMultiSpotForecasts();
+        return () => { isMounted = false; };
+    }, [locations, currentLocation.id, data, daily]);
 
     // ── Check Google Health connection on mount ──
     useEffect(() => {
@@ -432,6 +481,8 @@ const ForecastPage = () => {
                         locationId={currentLocation.id}
                         locationName={currentLocation.name}
                         currentTide={current?.tide}
+                        allLocationForecasts={allLocationForecasts}
+                        onSwitchLocation={switchLocation}
                     />
                 </div>
 

@@ -565,15 +565,17 @@ const averageAngles = (angles) => {
     return (Math.atan2(sum.sin / angles.length, sum.cos / angles.length) * 180 / Math.PI + 360) % 360;
 };
 
-export const getBestTimeBlocks = (hourlyForecast, userGear = [], idealRange, dailyData = null, sessions = []) => {
+export const getBestTimeBlocks = (hourlyForecast, userGear = [], idealRange, dailyData = null, sessions = [], locationMeta = null) => {
     if (!hourlyForecast || !Array.isArray(hourlyForecast) || hourlyForecast.length === 0) return [];
 
-    // 1. Get Scored Candidates
+    const now = new Date();
+    const horizonMs = 48 * 3600 * 1000;
+
+    // 1. Get Scored Candidates (within next 48h daylight)
     const candidates = hourlyForecast.filter(slot => {
         if (!slot || !slot.time) return false;
         const date = new Date(slot.time);
-        const now = new Date();
-        if (date <= now) return false;
+        if (date <= now || (date.getTime() - now.getTime()) > horizonMs) return false;
 
         // Daylight Check
         let isDaylight = false;
@@ -628,6 +630,8 @@ export const getBestTimeBlocks = (hourlyForecast, userGear = [], idealRange, dai
     });
     if (currentBlock.length > 0) blocks.push(currentBlock);
 
+    const spotProfile = locationMeta?.id ? analyzeSpotWindProfile(sessions, locationMeta.id) : null;
+
     // 3. Aggregate Block Data
     return blocks
         .filter(block => block.length > 0)
@@ -644,6 +648,21 @@ export const getBestTimeBlocks = (hourlyForecast, userGear = [], idealRange, dai
             });
 
             const overallRating = getWindRating(avgSpeed, avgDirection, idealRange);
+            const isIdealSector = idealRange
+                ? isDirectionInSector(avgDirection, idealRange.min, idealRange.max)
+                : false;
+            const inProvenCorridor = spotProfile
+                ? isDirectionInSector(avgDirection, spotProfile.corridorMin, spotProfile.corridorMax)
+                : false;
+
+            // Composite ranking score for cross-location comparison
+            const ratingBase = (overallRating.rating || 0) * 20;
+            const sectorBonus = isIdealSector ? 12 : 0;
+            const corridorBonus = inProvenCorridor ? 8 : 0;
+            const durationBonus = Math.min(8, block.length * 1.5);
+            const gustSpreadKts = Math.max(0, (maxGusts - avgSpeed) * 0.539957);
+            const gustPenalty = gustSpreadKts >= 9 ? Math.min(10, (gustSpreadKts - 8) * 1.5) : 0;
+            const spotScore = Math.round(ratingBase + sectorBonus + corridorBonus + durationBonus - gustPenalty);
 
             return {
                 start: block[0].time,
@@ -655,12 +674,84 @@ export const getBestTimeBlocks = (hourlyForecast, userGear = [], idealRange, dai
                 avgDirection,
                 rating: overallRating,
                 gear: gearRec,
-                hourlyData: block
+                hourlyData: block,
+                locationId: locationMeta?.id || null,
+                locationName: locationMeta?.name || null,
+                idealWindDirection: idealRange || locationMeta?.idealWindDirection || null,
+                isIdealSector,
+                inProvenCorridor,
+                spotScore
             };
         })
-        .sort((a, b) => b.rating.rating - a.rating.rating || a.start - b.start);
+        .sort((a, b) => b.spotScore - a.spotScore || b.rating.rating - a.rating.rating || new Date(a.start) - new Date(b.start));
 };
 
-export const suggestBestSessions = (hourlyForecast, userGear = [], idealRange, dailyData = null, sessions = []) => {
-    return getBestTimeBlocks(hourlyForecast, userGear, idealRange, dailyData, sessions);
+export const suggestBestSessions = (hourlyForecast, userGear = [], idealRange, dailyData = null, sessions = [], locationMeta = null) => {
+    return getBestTimeBlocks(hourlyForecast, userGear, idealRange, dailyData, sessions, locationMeta);
+};
+
+/**
+ * Evaluates forecasts across multiple saved locations to recommend BOTH the best time AND best location(s) to go.
+ *
+ * @param {Array<{ location: object, hourlyForecast: Array, dailyData?: object }>} locationForecasts
+ * @param {Array} userGear
+ * @param {Array} sessions
+ * @returns {{
+ *   bestOverallBlock: object|null,
+ *   rankedBlocks: Array,
+ *   bestByLocation: Array<{ location: object, topBlock: object|null, spotProfile: object|null }>
+ * }}
+ */
+export const rankLocationsAndTimes = (locationForecasts = [], userGear = [], sessions = []) => {
+    if (!Array.isArray(locationForecasts) || locationForecasts.length === 0) {
+        return { bestOverallBlock: null, rankedBlocks: [], bestByLocation: [] };
+    }
+
+    const allBlocks = [];
+    const bestByLocation = [];
+
+    for (const item of locationForecasts) {
+        const loc = item?.location;
+        if (!loc || !Array.isArray(item.hourlyForecast)) continue;
+
+        const idealRange = loc.idealWindDirection || { min: 135, max: 270 };
+        const locBlocks = getBestTimeBlocks(
+            item.hourlyForecast,
+            userGear,
+            idealRange,
+            item.dailyData || null,
+            sessions,
+            { id: loc.id, name: loc.name, idealWindDirection: idealRange }
+        );
+
+        const spotProfile = analyzeSpotWindProfile(sessions, loc.id);
+        bestByLocation.push({
+            location: loc,
+            topBlock: locBlocks[0] || null,
+            blocksCount: locBlocks.length,
+            spotProfile
+        });
+
+        for (const b of locBlocks) {
+            allBlocks.push(b);
+        }
+    }
+
+    allBlocks.sort((a, b) =>
+        (b.spotScore || 0) - (a.spotScore || 0) ||
+        (b.rating?.rating || 0) - (a.rating?.rating || 0) ||
+        new Date(a.start) - new Date(b.start)
+    );
+
+    bestByLocation.sort((a, b) => {
+        const scoreA = a.topBlock?.spotScore ?? -1;
+        const scoreB = b.topBlock?.spotScore ?? -1;
+        return scoreB - scoreA;
+    });
+
+    return {
+        bestOverallBlock: allBlocks[0] || null,
+        rankedBlocks: allBlocks,
+        bestByLocation
+    };
 };

@@ -2,8 +2,9 @@ import React, { useState, useEffect, lazy, Suspense, useMemo } from 'react';
 import { useLocation } from '../context/LocationContext';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { getJournalEntries, addJournalEntry, deleteJournalEntry, updateJournalEntry } from '../services/journalService';
-import { Book, Plus, Trash2, Edit2, Calendar, Wind, Clock, MapPin, X, ChevronRight, Search, Activity, FileText, CheckCircle2, RotateCcw, Sparkles } from 'lucide-react';
+import { getJournalEntries, subscribeToJournalEntries, addJournalEntry, deleteJournalEntry, updateJournalEntry } from '../services/journalService';
+import { getUserGear, subscribeToUserGear } from '../services/dbService';
+import { Book, Plus, Trash2, Edit2, Calendar, Wind, Clock, MapPin, X, ChevronRight, Search, Activity, FileText, CheckCircle2, RotateCcw, Sparkles, RefreshCw, Cloud, LogIn } from 'lucide-react';
 import { format } from 'date-fns';
 import { parseGpsFile } from '../services/tcxService';
 import { analyzeSession } from '../services/foilAnalysisService';
@@ -47,9 +48,10 @@ const safeFormatDate = (dateVal, fmt) => {
 
 const SessionsPage = () => {
     const { currentLocation } = useLocation();
-    const { user, loading: authLoading } = useAuth();
+    const { user, login, loading: authLoading } = useAuth();
     const { showToast } = useToast();
     const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+    const [isSyncing, setIsSyncing] = useState(false);
     const navigate = useNavigate();
     const [entries, setEntries] = useState([]);
     const [isAdding, setIsAdding] = useState(false);
@@ -66,20 +68,35 @@ const SessionsPage = () => {
     const [selectedLocation, setSelectedLocation] = useState('ALL');
     const [minRating, setMinRating] = useState(0);
 
-    // Gear state 
+    // Gear state (real-time synced across devices)
     const [userGear, setUserGear] = useState([]);
     useEffect(() => {
         if (authLoading) return;
-        const fetchGear = async () => {
-            if (user?.uid) {
-                const { getUserGear } = await import('../services/dbService');
-                const gear = await getUserGear(user.uid);
-                setUserGear(gear);
-            } else {
+        let isMounted = true;
+        if (user?.uid) {
+            const unsubscribeGear = subscribeToUserGear(
+                user.uid,
+                (gear) => {
+                    if (isMounted) setUserGear(gear || []);
+                },
+                async () => {
+                    try {
+                        const gear = await getUserGear(user.uid);
+                        if (isMounted) setUserGear(gear || []);
+                    } catch (_) { /* ignore */ }
+                }
+            );
+            return () => {
+                isMounted = false;
+                if (typeof unsubscribeGear === 'function') unsubscribeGear();
+            };
+        } else {
+            try {
                 setUserGear(JSON.parse(localStorage.getItem('melvill_user_gear') || '[]'));
+            } catch {
+                setUserGear([]);
             }
-        };
-        fetchGear();
+        }
     }, [user?.uid, authLoading]);
 
     // Form State
@@ -116,12 +133,15 @@ const SessionsPage = () => {
 
     useEffect(() => {
         if (authLoading) return;
-        const fetchEntries = async () => {
-            const data = await getJournalEntries(user?.uid);
-            setEntries(data);
+        let isMounted = true;
+        const unsubscribe = subscribeToJournalEntries(user?.uid, (data) => {
+            if (isMounted) setEntries(data || []);
+        });
+        return () => {
+            isMounted = false;
+            if (typeof unsubscribe === 'function') unsubscribe();
         };
-        fetchEntries();
-    }, [currentLocation, user?.uid, authLoading]);
+    }, [user?.uid, authLoading]);
 
     // Smart Fill Logic — uses weather data (last 7 days history from Open-Meteo)
     const [weatherData, setWeatherData] = useState([]);
@@ -414,33 +434,87 @@ const SessionsPage = () => {
 
     const isFiltered = searchQuery.trim() !== '' || selectedLocation !== 'ALL' || minRating > 0;
 
+    const handleManualSync = async () => {
+        if (!user?.uid || isSyncing) return;
+        setIsSyncing(true);
+        try {
+            const refreshed = await getJournalEntries(user.uid);
+            setEntries(refreshed);
+            showToast(`Cloud sync complete (${refreshed.length} sessions)`, 'success');
+        } catch (err) {
+            showToast('Cloud sync failed: ' + err.message, 'error');
+        } finally {
+            setIsSyncing(false);
+        }
+    };
+
     return (
         <div className="app-container">
-            <header style={{ marginBottom: '1.5rem' }}>
-                <h1 className="text-gradient" style={{ margin: 0, fontSize: '2rem', fontWeight: 800 }}>
-                    Session Journal
-                </h1>
-            </header>
+            <header style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                <div>
+                    <h1 className="text-gradient" style={{ margin: 0, fontSize: '2rem', fontWeight: 800 }}>
+                        Session Journal
+                    </h1>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {user ? (
+                            <>
+                                <Cloud size={13} color="#4ade80" />
+                                <span>Live cloud sync active ({user.email || user.displayName})</span>
+                            </>
+                        ) : (
+                            <>
+                                <Cloud size={13} color="#fbbf24" />
+                                <span>Local device only — sign in to sync across mobile &amp; desktop</span>
+                            </>
+                        )}
+                    </div>
+                </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
-                <button
-                    onClick={() => {
-                        if (isAdding) {
-                            setIsAdding(false);
-                            setEditId(null);
-                            setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '', mapPolyline: null, streams: null, activityStats: null, foilAnalysis: null });
-                            setTcxFileName(null);
-                            setShowGfitDrawer(false);
-                        } else {
-                            setIsAdding(true);
-                        }
-                    }}
-                    className="btn-primary"
-                    style={{ padding: '8px 20px', fontSize: '0.9rem' }}
-                >
-                    {isAdding ? 'Cancel' : '+ Log Session'}
-                </button>
-            </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    {user ? (
+                        <button
+                            type="button"
+                            onClick={handleManualSync}
+                            disabled={isSyncing}
+                            className="btn-secondary"
+                            style={{ padding: '7px 12px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '6px' }}
+                            title="Force sync with cloud database"
+                        >
+                            <RefreshCw size={14} className={isSyncing ? 'spin' : ''} />
+                            {isSyncing ? 'Syncing…' : 'Sync Now'}
+                        </button>
+                    ) : (
+                        <button
+                            type="button"
+                            onClick={login}
+                            disabled={authLoading}
+                            className="btn-secondary"
+                            style={{ padding: '7px 12px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '6px', borderColor: 'var(--accent-primary)', color: 'var(--accent-primary)' }}
+                        >
+                            <LogIn size={14} />
+                            Sign in to Sync
+                        </button>
+                    )}
+
+                    <button
+                        onClick={() => {
+                            if (isAdding) {
+                                setIsAdding(false);
+                                setEditId(null);
+                                setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '', mapPolyline: null, streams: null, activityStats: null, foilAnalysis: null });
+                                setTcxFileName(null);
+                                setShowGfitDrawer(false);
+                            } else {
+                                setIsAdding(true);
+                            }
+                        }}
+                        className="btn-primary"
+                        style={{ padding: '8px 20px', fontSize: '0.9rem' }}
+                    >
+                        {isAdding ? 'Cancel' : '+ Log Session'}
+                    </button>
+                </div>
+            </header>
 
             {/* ── Unified Single-View Session Logging Form (Core UX #8) ── */}
             {isAdding && (

@@ -7,7 +7,8 @@ import {
     buildPersonalSweetSpotMatrix,
     getGearRecommendation,
     analyzeSpotWindProfile,
-    findSimilarPastSessions
+    findSimilarPastSessions,
+    rankLocationsAndTimes
 } from '../recommendationService';
 
 describe('recommendationService - wind sectors', () => {
@@ -179,5 +180,41 @@ describe('recommendationService - Phase 4 Statistical Gear & Spot Engine', () =>
         expect(matches.length).toBe(2);
         expect(matches[0].entry.id).toBe('s1');
         expect(matches[0].powerLabel).toBe('Dialed');
+    });
+
+    it('ranks multiple locations and recommends both the best time and best location based on wind sector and history', () => {
+        const now = new Date();
+        const future1 = new Date(now.getTime() + 3 * 3600 * 1000);
+        future1.setHours(14, 0, 0, 0);
+        if (future1 <= now) future1.setDate(future1.getDate() + 1);
+        const future2 = new Date(future1.getTime() + 3600 * 1000);
+
+        // Forecast has an Easterly (90°) 22 km/h breeze:
+        // - Melville ideal sector is SW (180°–250°), so 90° is off-axis
+        // - East Bay ideal sector is E (70°–110°), so 90° is ideal
+        const hourlySlots = [
+            { time: future1.getTime(), speed: 22, gusts: 26, direction: 90 },
+            { time: future2.getTime(), speed: 24, gusts: 28, direction: 92 },
+        ];
+
+        const locationForecasts = [
+            {
+                location: { id: 'melville', name: 'Melville Waters', idealWindDirection: { min: 180, max: 250 } },
+                hourlyForecast: hourlySlots,
+                dailyData: null
+            },
+            {
+                location: { id: 'eastbay', name: 'East Bay Point', idealWindDirection: { min: 70, max: 110 } },
+                hourlyForecast: hourlySlots,
+                dailyData: null
+            }
+        ];
+
+        const ranking = rankLocationsAndTimes(locationForecasts, mockGear, mockSessions);
+        expect(ranking.bestOverallBlock).not.toBeNull();
+        expect(ranking.bestOverallBlock.locationId).toBe('eastbay');
+        expect(ranking.bestOverallBlock.locationName).toBe('East Bay Point');
+        expect(ranking.bestOverallBlock.isIdealSector).toBe(true);
+        expect(ranking.rankedBlocks.length).toBe(2);
     });
 });

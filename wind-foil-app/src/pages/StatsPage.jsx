@@ -8,7 +8,7 @@ import {
 import { format } from 'date-fns';
 import { useAuth } from '../context/AuthContext';
 import { usePreferences } from '../context/PreferencesContext';
-import { getJournalEntries } from '../services/journalService';
+import { subscribeToJournalEntries } from '../services/journalService';
 import { analyzeSession, formatDurationSec } from '../services/foilAnalysisService';
 
 const safeFormatDate = (dateVal, fmt) => {
@@ -36,19 +36,17 @@ const StatsPage = () => {
     useEffect(() => {
         if (authLoading) return;
         let mounted = true;
-        const load = async () => {
-            setLoading(true);
-            try {
-                const data = await getJournalEntries(user?.uid);
-                if (mounted) setEntries(data || []);
-            } catch (e) {
-                console.warn('[StatsPage] Failed to load entries:', e);
-            } finally {
-                if (mounted) setLoading(false);
+        setLoading(true);
+        const unsubscribe = subscribeToJournalEntries(user?.uid, (data) => {
+            if (mounted) {
+                setEntries(data || []);
+                setLoading(false);
             }
+        });
+        return () => {
+            mounted = false;
+            if (typeof unsubscribe === 'function') unsubscribe();
         };
-        load();
-        return () => { mounted = false; };
     }, [user?.uid, authLoading]);
 
     // Enrich entries with computed foilAnalysis (including maneuvers & longestFlightSec)

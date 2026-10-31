@@ -1,6 +1,6 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getJournalEntries, updateJournalEntry } from '../services/journalService';
+import { subscribeToJournalEntries, updateJournalEntry } from '../services/journalService';
 import { analyzeSession, formatDurationSec } from '../services/foilAnalysisService';
 import { generateSessionCoachDebrief, extractSessionCoachTags } from '../services/aiCoachService';
 import { ArrowLeft, MapPin, Wind, Clock, Compass, Activity, Zap, Award, Sparkles, RefreshCw, CheckCircle2, Sliders, Target } from 'lucide-react';
@@ -16,7 +16,7 @@ const HeartRateChart = lazy(() => import('../components/HeartRateChart'));
 const SessionDetailPage = () => {
     const { id } = useParams();
     const navigate = useNavigate();
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const { unit } = usePreferences();
     const { showToast } = useToast();
     const speedUnit = unit === 'kmh' ? 'km/h' : 'kts';
@@ -29,9 +29,11 @@ const SessionDetailPage = () => {
     const [coachLoading, setCoachLoading] = useState(false);
 
     useEffect(() => {
-        const fetchEntries = async () => {
-            const entries = await getJournalEntries(user?.uid);
-            const found = entries.find(e => e.id === id);
+        if (authLoading) return;
+        let isMounted = true;
+        const unsubscribe = subscribeToJournalEntries(user?.uid, (entries) => {
+            if (!isMounted) return;
+            const found = (entries || []).find(e => String(e.id) === String(id));
             if (found) {
                 setEntry(found);
                 let a = found.foilAnalysis;
@@ -40,9 +42,12 @@ const SessionDetailPage = () => {
                 }
                 setAnalysis(a);
             }
+        });
+        return () => {
+            isMounted = false;
+            if (typeof unsubscribe === 'function') unsubscribe();
         };
-        fetchEntries();
-    }, [id, user?.uid]);
+    }, [id, user?.uid, authLoading]);
 
     const handleGenerateCoachDebrief = async () => {
         if (!entry || coachLoading) return;

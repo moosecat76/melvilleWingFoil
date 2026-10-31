@@ -18,6 +18,12 @@ describe('Additive merge rules (never lose sessions)', () => {
         expect(isSameJournalEntry(a, b)).toBe(false);
     });
 
+    it('keeps sessions at different locations apart even if date and notes match', () => {
+        const a = { id: 'local-1', date: '2026-02-22T08:06:00.000Z', notes: '', locationId: 'melville' };
+        const b = { id: 'cloud-2', date: '2026-02-22T08:06:00.000Z', notes: '', locationId: 'woodman' };
+        expect(isSameJournalEntry(a, b)).toBe(false);
+    });
+
     it('mergeItemLists unions by id, keeps everything, and primary wins on conflict', () => {
         const cloud = [{ id: 1, model: 'Cloud wing' }, { id: 2, model: 'Board' }];
         const backup = [{ id: 1, model: 'Old backup wing' }, { id: 3, model: 'Foil' }];
