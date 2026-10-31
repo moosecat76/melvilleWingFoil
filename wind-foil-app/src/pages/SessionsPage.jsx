@@ -47,7 +47,7 @@ const safeFormatDate = (dateVal, fmt) => {
 };
 
 const SessionsPage = () => {
-    const { currentLocation } = useLocation();
+    const { locations, currentLocation } = useLocation();
     const { user, login, loading: authLoading } = useAuth();
     const { showToast } = useToast();
     const [confirmDeleteId, setConfirmDeleteId] = useState(null);
@@ -257,7 +257,7 @@ const SessionsPage = () => {
             mapPolyline: entry.mapPolyline || null,
             streams: entry.streams || null,
             activityStats: entry.activityStats || null,
-            foilAnalysis: (entry.streams && (!entry.foilAnalysis || !entry.foilAnalysis.adaptiveProfile)) ? analyzeSession(entry.streams) : (entry.foilAnalysis || null)
+            foilAnalysis: (entry.streams && (!entry.foilAnalysis || !entry.foilAnalysis.adaptiveProfile || entry.foilAnalysis.stats?.percentFoilMoving === undefined)) ? analyzeSession(entry.streams) : (entry.foilAnalysis || null)
         });
         setTcxFileName(entry.mapPolyline ? 'Saved track' : null);
         setIsAdding(true);
@@ -393,8 +393,22 @@ const SessionsPage = () => {
     const getQuickStats = (entry) => {
         try {
             let analysis = entry.foilAnalysis;
-            if (entry.streams && (!analysis || !analysis.adaptiveProfile || !analysis.data)) {
+            if (entry.streams && (!analysis || !analysis.adaptiveProfile || !analysis.data || analysis.stats?.percentFoilMoving === undefined)) {
                 return analyzeSession(entry.streams) || analysis || null;
+            }
+            if (analysis?.stats && analysis.stats.percentFoilMoving === undefined) {
+                const rawFoilMin = parseFloat(analysis.stats.totalFoilTime || 0);
+                const durationMin = parseFloat(entry.activityStats?.duration || 0);
+                if (durationMin > 0 && rawFoilMin >= 0) {
+                    analysis = {
+                        ...analysis,
+                        stats: {
+                            ...analysis.stats,
+                            percentFoilMoving: analysis.stats.percentFoil,
+                            percentFoil: Math.min(100, Number(((rawFoilMin / durationMin) * 100).toFixed(1))).toFixed(1)
+                        }
+                    };
+                }
             }
             return analysis || null;
         } catch (e) {
@@ -413,20 +427,36 @@ const SessionsPage = () => {
         return map;
     }, [entries]);
 
-    // Distinct locations for filter dropdown
+    // Distinct locations for filter dropdown (canonicalized and deduplicated)
     const uniqueLocations = useMemo(() => {
+        const canonicalMap = new Map();
+        (locations || []).forEach(l => {
+            if (l.name) {
+                canonicalMap.set(l.name.trim().toLowerCase(), l.name.trim());
+            }
+        });
+
         const set = new Set();
         entries.forEach(e => {
-            if (e.locationName) set.add(e.locationName);
+            const raw = (e.locationName || '').trim();
+            if (raw) {
+                const key = raw.toLowerCase();
+                const canonical = canonicalMap.get(key) || raw;
+                set.add(canonical);
+            }
         });
         return Array.from(set);
-    }, [entries]);
+    }, [entries, locations]);
 
     // Filtered entries
     const filteredEntries = useMemo(() => {
         return entries.filter(entry => {
-            if (selectedLocation !== 'ALL' && entry.locationName !== selectedLocation) {
-                return false;
+            if (selectedLocation !== 'ALL') {
+                const entryLoc = (entry.locationName || '').trim().toLowerCase();
+                const selLoc = selectedLocation.trim().toLowerCase();
+                if (entryLoc !== selLoc) {
+                    return false;
+                }
             }
             if (minRating > 0 && (Number(entry.rating) || 0) < minRating) {
                 return false;
@@ -1069,7 +1099,12 @@ const SessionsPage = () => {
                                                         <span><b>{parseFloat(entry.activityStats?.distance || analysis.stats.totalDistance).toFixed(2)} km</b> Distance</span>
                                                     )}
                                                     <span style={{ color: '#5cb85c' }}><b>{analysis.stats.totalFoilTime}m</b> Time on Foil</span>
-                                                    <span style={{ color: '#38bdf8' }}><b>{analysis.stats.percentFoil}%</b></span>
+                                                    <span style={{ color: '#38bdf8' }} title={analysis.stats.percentFoilMoving ? `${analysis.stats.percentFoil}% of session (${analysis.stats.percentFoilMoving}% of moving time)` : `${analysis.stats.percentFoil}% on foil`}>
+                                                        <b>{analysis.stats.percentFoil}%</b>
+                                                        {analysis.stats.percentFoilMoving && analysis.stats.percentFoilMoving !== analysis.stats.percentFoil && (
+                                                            <span style={{ fontSize: '0.72rem', opacity: 0.8, marginLeft: '3px' }}>({analysis.stats.percentFoilMoving}% mov)</span>
+                                                        )}
+                                                    </span>
                                                     <span style={{ color: '#facc15' }}><b>{analysis.stats.totalRuns}</b> Runs</span>
                                                     <span><b>{analysis.stats.numberOfFlights}</b> Flights</span>
                                                 </div>

@@ -193,7 +193,7 @@ export const hydrateJournalEntry = (entry) => {
         }
     }
 
-    if (hydrated.streams && (!hydrated.foilAnalysis || !hydrated.foilAnalysis.data || !hydrated.foilAnalysis.adaptiveProfile)) {
+    if (hydrated.streams && (!hydrated.foilAnalysis || !hydrated.foilAnalysis.data || !hydrated.foilAnalysis.adaptiveProfile || hydrated.foilAnalysis.stats?.percentFoilMoving === undefined)) {
         try {
             const computed = analyzeSession(hydrated.streams);
             if (computed) {
@@ -201,6 +201,17 @@ export const hydrateJournalEntry = (entry) => {
             }
         } catch (e) {
             console.warn('[DB] Could not compute foilAnalysis for entry:', hydrated.id, e);
+        }
+    }
+
+    // Historical fallback: if foilAnalysis was previously saved without percentFoilMoving,
+    // re-calculate percentFoil using total session duration from activityStats (if available)
+    if (hydrated.foilAnalysis?.stats && hydrated.foilAnalysis.stats.percentFoilMoving === undefined) {
+        const rawFoilMin = parseFloat(hydrated.foilAnalysis.stats.totalFoilTime || 0);
+        const durationMin = parseFloat(hydrated.activityStats?.duration || 0);
+        hydrated.foilAnalysis.stats.percentFoilMoving = hydrated.foilAnalysis.stats.percentFoil;
+        if (durationMin > 0 && rawFoilMin >= 0) {
+            hydrated.foilAnalysis.stats.percentFoil = Math.min(100, Number(((rawFoilMin / durationMin) * 100).toFixed(1))).toFixed(1);
         }
     }
 

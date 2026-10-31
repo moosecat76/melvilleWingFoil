@@ -116,7 +116,7 @@ const normalizeAndValidateCoords = (rawLat, rawLon) => {
 };
 
 const LocationManager = () => {
-    const { locations, currentLocation, switchLocation, addLocation, deleteLocation, updateLocation } = useLocation();
+    const { locations, currentLocation, switchLocation, addLocation, deleteLocation, updateLocation, deduplicateLocations } = useLocation();
     const { showToast } = useToast();
     const [isAdding, setIsAdding] = useState(false);
     const [showAddMap, setShowAddMap] = useState(false);
@@ -126,6 +126,41 @@ const LocationManager = () => {
     const [editingId, setEditingId] = useState(null);
     const [showEditMap, setShowEditMap] = useState(false);
     const [editForm, setEditForm] = useState({});
+
+    // Duplicate detection (by ID, normalized name, or nearby coordinates)
+    const duplicateCount = React.useMemo(() => {
+        const kept = [];
+        let dupes = 0;
+        locations.forEach(loc => {
+            const normName = (loc.name || '').trim().toLowerCase();
+            const lat = Number(loc.latitude);
+            const lon = Number(loc.longitude);
+            const idStr = loc.id != null ? String(loc.id) : null;
+
+            const isDuplicate = kept.some(existing => {
+                const exNormName = (existing.name || '').trim().toLowerCase();
+                const exLat = Number(existing.latitude);
+                const exLon = Number(existing.longitude);
+                const exIdStr = existing.id != null ? String(existing.id) : null;
+
+                if (idStr && exIdStr && idStr === exIdStr) return true;
+                if (normName && exNormName && normName === exNormName) return true;
+                if (!isNaN(lat) && !isNaN(lon) && !isNaN(exLat) && !isNaN(exLon)) {
+                    const dLat = Math.abs(lat - exLat);
+                    const dLon = Math.abs(lon - exLon);
+                    if (dLat < 0.0015 && dLon < 0.0015) return true;
+                }
+                return false;
+            });
+
+            if (isDuplicate) {
+                dupes++;
+            } else {
+                kept.push(loc);
+            }
+        });
+        return dupes;
+    }, [locations]);
 
     const handleAdd = (e) => {
         e.preventDefault();
@@ -299,12 +334,49 @@ const LocationManager = () => {
                 </form>
             )}
 
+            {/* ── Duplicate Cleanup Banner ── */}
+            {duplicateCount > 0 && (
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 12px',
+                    marginBottom: '8px',
+                    background: 'rgba(234, 179, 8, 0.12)',
+                    border: '1px solid rgba(234, 179, 8, 0.35)',
+                    borderRadius: '6px',
+                    fontSize: '0.8rem',
+                    color: '#facc15'
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <AlertCircle size={14} />
+                        <span>{duplicateCount} duplicate location{duplicateCount > 1 ? 's' : ''} detected</span>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            const removed = deduplicateLocations();
+                            if (removed > 0) {
+                                showToast(`Cleaned up ${removed} duplicate location${removed > 1 ? 's' : ''}`, 'success');
+                            }
+                        }}
+                        className="btn-secondary"
+                        style={{ padding: '3px 8px', fontSize: '0.75rem', borderColor: 'rgba(234, 179, 8, 0.4)', color: '#facc15' }}
+                    >
+                        Clean up Duplicates
+                    </button>
+                </div>
+            )}
+
             {/* ── Locations List ── */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 {locations.map(loc => {
                     const isEditing = editingId === loc.id;
                     const isCurrent = currentLocation.id === loc.id;
                     const coordsValid = isValidCoordinates(loc.latitude, loc.longitude);
+                    const isMelville = String(loc.id) === 'melville' || (loc.name || '').trim().toLowerCase() === 'melville waters';
+                    const melvilleCount = locations.filter(l => String(l.id) === 'melville' || (l.name || '').trim().toLowerCase() === 'melville waters').length;
+                    const canDelete = !isMelville || melvilleCount > 1;
 
                     if (isEditing) {
                         return (
@@ -444,9 +516,13 @@ const LocationManager = () => {
                                 >
                                     <Edit2 size={14} />
                                 </button>
-                                {loc.id !== 'melville' && (
+                                {canDelete && (
                                     <button
-                                        onClick={(e) => { e.stopPropagation(); deleteLocation(loc.id); }}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            deleteLocation(loc.id);
+                                            showToast(`Deleted "${loc.name}"`, 'info');
+                                        }}
                                         style={{ background: 'transparent', border: 'none', color: '#ff6b6b', cursor: 'pointer', padding: '4px' }}
                                         title="Delete Location"
                                     >

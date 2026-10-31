@@ -63,7 +63,7 @@ const getStoredLocations = () => {
         const parsed = JSON.parse(raw);
         if (!Array.isArray(parsed) || parsed.length === 0) return [DEFAULT_LOCATION];
         const sanitized = parsed.map(sanitizeLocation);
-        const hasMelville = sanitized.some(l => l.id === 'melville');
+        const hasMelville = sanitized.some(l => String(l.id) === 'melville' || (l.name || '').trim().toLowerCase() === DEFAULT_LOCATION.name.toLowerCase());
         return hasMelville ? sanitized : [DEFAULT_LOCATION, ...sanitized];
     } catch {
         return [DEFAULT_LOCATION];
@@ -110,10 +110,29 @@ export const LocationProvider = ({ children }) => {
                 currentUid,
                 async ({ items: remoteLocations, currentId: remoteCurrentId }) => {
                     if (!isMounted) return;
-                    const localLocs = getStoredLocations();
-                    const merged = mergeItemLists(remoteLocations || [], localLocs).map(sanitizeLocation);
-                    const hasMelville = merged.some(l => l.id === 'melville');
-                    const finalList = hasMelville ? merged : [DEFAULT_LOCATION, ...merged];
+                    const isInitialSync = syncCompletedForUid.current !== currentUid;
+
+                    let finalList;
+                    if (isInitialSync) {
+                        const localLocs = getStoredLocations();
+                        const merged = mergeItemLists(remoteLocations || [], localLocs).map(sanitizeLocation);
+                        const hasMelville = merged.some(l => l.id === 'melville');
+                        finalList = hasMelville ? merged : [DEFAULT_LOCATION, ...merged];
+
+                        // If local had locations not yet in cloud, push the merged list once
+                        if (!remoteLocations || finalList.length > (remoteLocations?.length || 0)) {
+                            saveUserLocations(currentUid, finalList).catch(() => {});
+                        }
+                        syncCompletedForUid.current = currentUid;
+                    } else {
+                        // Real-time snapshot from Firestore after initial sync:
+                        // Cloud is the source of truth — adopt it directly so deletions are respected.
+                        const baseList = (Array.isArray(remoteLocations) && remoteLocations.length > 0)
+                            ? remoteLocations.map(sanitizeLocation)
+                            : [DEFAULT_LOCATION];
+                        const hasMelville = baseList.some(l => l.id === 'melville');
+                        finalList = hasMelville ? baseList : [DEFAULT_LOCATION, ...baseList];
+                    }
 
                     const targetId = remoteCurrentId || localStorage.getItem('currentLocationId') || 'melville';
                     const activeLoc = finalList.find(l => l.id === targetId && isValidCoordinates(l.latitude, l.longitude))
@@ -125,17 +144,12 @@ export const LocationProvider = ({ children }) => {
                         localStorage.setItem('currentLocationId', activeLoc.id);
                     } catch (_) { /* ignore */ }
 
-                    // If local had locations not yet in cloud, push the merged list once
-                    if (!remoteLocations || finalList.length > remoteLocations.length) {
-                        saveUserLocations(currentUid, finalList).catch(() => {});
-                    }
-                    if (!remoteCurrentId) {
+                    if (isInitialSync && !remoteCurrentId) {
                         saveCurrentLocationId(currentUid, activeLoc.id).catch(() => {});
                     }
 
                     setLocations(finalList);
                     setCurrentLocation(activeLoc);
-                    syncCompletedForUid.current = currentUid;
                 },
                 async (err) => {
                     console.warn('[LocationContext] Cloud subscription fallback:', err);
@@ -174,7 +188,7 @@ export const LocationProvider = ({ children }) => {
 
     // Helper to persist both to localStorage and Firestore
     const persistLocations = (newLocations, newCurrentLoc = null) => {
-        const hasMelville = newLocations.some(l => l.id === 'melville');
+        const hasMelville = newLocations.some(l => String(l.id) === 'melville' || (l.name || '').trim().toLowerCase() === DEFAULT_LOCATION.name.toLowerCase());
         const safeList = hasMelville ? newLocations : [DEFAULT_LOCATION, ...newLocations];
 
         // 1. Always update localStorage immediately
@@ -231,18 +245,79 @@ export const LocationProvider = ({ children }) => {
     };
 
     const deleteLocation = (id) => {
-        if (id === 'melville') return;
-        const remaining = locations.filter(l => l.id !== id);
+        const targetIdStr = String(id);
+        const melvilleMatches = locations.filter(l => String(l.id) === 'melville' || (l.name || '').trim().toLowerCase() === DEFAULT_LOCATION.name.toLowerCase());
+        const isTargetMelville = targetIdStr === 'melville' || locations.find(l => String(l.id) === targetIdStr)?.name?.trim().toLowerCase() === DEFAULT_LOCATION.name.toLowerCase();
+        
+        // Prevent deleting the default Melville location unless there are duplicate copies of it
+        if (isTargetMelville && melvilleMatches.length <= 1) return;
+
+        let removed = false;
+        const remaining = locations.filter(l => {
+            if (!removed && String(l.id) === targetIdStr) {
+                removed = true;
+                return false;
+            }
+            return true;
+        });
         const safeRemaining = remaining.length > 0 ? remaining : [DEFAULT_LOCATION];
 
         let nextCurrent = currentLocation;
-        if (currentLocation.id === id) {
+        if (String(currentLocation.id) === targetIdStr) {
             nextCurrent = safeRemaining[0];
             setCurrentLocation(nextCurrent);
         }
 
         setLocations(safeRemaining);
         persistLocations(safeRemaining, nextCurrent);
+    };
+
+    const deduplicateLocations = () => {
+        const deduped = [];
+        let count = 0;
+
+        for (const loc of locations) {
+            const normName = (loc.name || '').trim().toLowerCase();
+            const lat = Number(loc.latitude);
+            const lon = Number(loc.longitude);
+            const idStr = loc.id != null ? String(loc.id) : null;
+
+            // Check if this location is a duplicate of any already kept in deduped
+            const isDuplicate = deduped.some(existing => {
+                const exNormName = (existing.name || '').trim().toLowerCase();
+                const exLat = Number(existing.latitude);
+                const exLon = Number(existing.longitude);
+                const exIdStr = existing.id != null ? String(existing.id) : null;
+
+                if (idStr && exIdStr && idStr === exIdStr) return true;
+                if (normName && exNormName && normName === exNormName) return true;
+                if (!isNaN(lat) && !isNaN(lon) && !isNaN(exLat) && !isNaN(exLon)) {
+                    const dLat = Math.abs(lat - exLat);
+                    const dLon = Math.abs(lon - exLon);
+                    // Approx within ~150 meters (0.0015 deg)
+                    if (dLat < 0.0015 && dLon < 0.0015) return true;
+                }
+                return false;
+            });
+
+            if (isDuplicate) {
+                count++;
+                continue;
+            }
+
+            deduped.push(loc);
+        }
+
+        if (count > 0) {
+            const hasMelville = deduped.some(l => String(l.id) === 'melville' || (l.name || '').trim().toLowerCase() === DEFAULT_LOCATION.name.toLowerCase());
+            const safeList = hasMelville ? deduped : [DEFAULT_LOCATION, ...deduped];
+            const nextCurrent = safeList.find(l => String(l.id) === String(currentLocation.id)) || safeList[0];
+            setLocations(safeList);
+            setCurrentLocation(nextCurrent);
+            persistLocations(safeList, nextCurrent);
+            return count;
+        }
+        return 0;
     };
 
     const updateLocation = (id, updates) => {
@@ -290,7 +365,8 @@ export const LocationProvider = ({ children }) => {
             switchLocation,
             deleteLocation,
             updateLocation,
-            resetToDefaultLocation
+            resetToDefaultLocation,
+            deduplicateLocations
         }}>
             {children}
         </LocationContext.Provider>

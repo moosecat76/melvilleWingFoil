@@ -435,6 +435,11 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                                                             <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#38bdf8' }}>
                                                                 {newEntry.foilAnalysis.stats.percentFoil}%
                                                             </div>
+                                                            {newEntry.foilAnalysis.stats.percentFoilMoving && newEntry.foilAnalysis.stats.percentFoilMoving !== newEntry.foilAnalysis.stats.percentFoil && (
+                                                                <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                                                                    {newEntry.foilAnalysis.stats.percentFoilMoving}% mov
+                                                                </div>
+                                                            )}
                                                         </div>
                                                         <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px', textAlign: 'center' }}>
                                                             <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Runs</div>
@@ -546,7 +551,12 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                                             <FoilAnalysisChart analysisData={analysis} />
                                             <div style={{ display: 'flex', gap: '10px', marginTop: '8px', fontSize: '0.85rem' }}>
                                                 <span style={{ color: '#5cb85c' }}><b>{analysis.stats.totalFoilTime}m</b> Foil</span>
-                                                <span style={{ color: '#38bdf8' }}><b>{analysis.stats.percentFoil}%</b> Eff.</span>
+                                                <span style={{ color: '#38bdf8' }} title={analysis.stats.percentFoilMoving ? `${analysis.stats.percentFoil}% of session (${analysis.stats.percentFoilMoving}% of moving time)` : `${analysis.stats.percentFoil}% on foil`}>
+                                                    <b>{analysis.stats.percentFoil}%</b>
+                                                    {analysis.stats.percentFoilMoving && analysis.stats.percentFoilMoving !== analysis.stats.percentFoil && (
+                                                        <span style={{ fontSize: '0.72rem', opacity: 0.8, marginLeft: '3px' }}>({analysis.stats.percentFoilMoving}% mov)</span>
+                                                    )}
+                                                </span>
                                                 <span style={{ color: '#facc15' }}><b>{analysis.stats.totalRuns}</b> Runs</span>
                                             </div>
                                         </div>

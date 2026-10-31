@@ -54,12 +54,25 @@ const StatsPage = () => {
         return entries
             .map((entry) => {
                 let analysis = entry.foilAnalysis;
-                if (entry.streams && (!analysis || !analysis.maneuvers || analysis.stats?.longestFlightSec == null)) {
+                if (entry.streams && (!analysis || !analysis.maneuvers || analysis.stats?.longestFlightSec == null || analysis.stats?.percentFoilMoving === undefined)) {
                     try {
                         analysis = analyzeSession(entry.streams, { windDirection: entry.windDirection, gearUsed: entry.gearUsed }) || analysis;
                     } catch (_) {
                         // Keep stored analysis if re-computation fails
                     }
+                } else if (analysis?.stats && analysis.stats.percentFoilMoving === undefined) {
+                    const rawFoilMin = parseFloat(analysis.stats.totalFoilTime || 0);
+                    const durationMin = parseFloat(entry.activityStats?.duration || 0);
+                    analysis = {
+                        ...analysis,
+                        stats: {
+                            ...analysis.stats,
+                            percentFoilMoving: analysis.stats.percentFoil,
+                            percentFoil: (durationMin > 0 && rawFoilMin >= 0)
+                                ? Math.min(100, Number(((rawFoilMin / durationMin) * 100).toFixed(1))).toFixed(1)
+                                : analysis.stats.percentFoil
+                        }
+                    };
                 }
                 const d = entry.date ? new Date(entry.date) : new Date(0);
                 return {
@@ -177,6 +190,7 @@ const StatsPage = () => {
                     fullDate: safeFormatDate(s.date, 'EEE dd MMM yyyy'),
                     location: s.locationName || 'Spot',
                     percentFoil: Number(parseFloat(st.percentFoil || 0).toFixed(1)),
+                    percentFoilMoving: st.percentFoilMoving ? Number(parseFloat(st.percentFoilMoving).toFixed(1)) : null,
                     topSpeed: Number((topKts * ktsToUnit).toFixed(1)),
                     foilMinutes: Number(parseFloat(st.totalFoilTime || 0).toFixed(1)),
                     longestFlightSec: longestSec,
@@ -419,7 +433,12 @@ const StatsPage = () => {
                                                 return (
                                                     <div style={{ background: '#1e293b', border: '1px solid var(--border-color)', padding: '10px', borderRadius: '8px', fontSize: '0.8rem' }}>
                                                         <div style={{ fontWeight: 700, color: 'var(--accent-primary)', marginBottom: '4px' }}>{d.fullDate}</div>
-                                                        <div style={{ color: '#4ade80' }}>% on Foil: <b>{d.percentFoil}%</b> ({d.foilMinutes}m)</div>
+                                                        <div style={{ color: '#4ade80' }}>
+                                                            % on Foil: <b>{d.percentFoil}%</b> ({d.foilMinutes}m)
+                                                            {d.percentFoilMoving && d.percentFoilMoving !== d.percentFoil && (
+                                                                <span style={{ fontSize: '0.72rem', opacity: 0.85, marginLeft: '4px' }}>({d.percentFoilMoving}% moving)</span>
+                                                            )}
+                                                        </div>
                                                         <div style={{ color: '#38bdf8' }}>Top Speed: <b>{d.topSpeed} {speedUnit}</b></div>
                                                         {d.longestFlightSec > 0 && (
                                                             <div style={{ color: '#a78bfa' }}>Longest Flight: <b>{formatDurationSec(d.longestFlightSec)}</b></div>

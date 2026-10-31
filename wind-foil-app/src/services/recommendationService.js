@@ -73,7 +73,7 @@ export const computeSessionQualityScore = (entry) => {
     const rating = Math.min(5, Math.max(1, Number(entry.rating) || 3));
     const ratingNorm = rating / 5; // 0.2 .. 1.0
 
-    const pctFoilRaw = entry.foilAnalysis?.stats?.percentFoil ?? entry.computedAnalysis?.stats?.percentFoil;
+    const pctFoilRaw = entry.foilAnalysis?.stats?.percentFoilMoving ?? entry.foilAnalysis?.stats?.percentFoil ?? entry.computedAnalysis?.stats?.percentFoilMoving ?? entry.computedAnalysis?.stats?.percentFoil;
     const hasFoilTelemetry = pctFoilRaw != null && !isNaN(parseFloat(pctFoilRaw)) && parseFloat(pctFoilRaw) > 0;
     // Normalize 55%+ time on foil as a 1.0 telemetry score
     const foilNorm = hasFoilTelemetry
@@ -126,7 +126,7 @@ export const buildPersonalSweetSpotMatrix = (sessions = [], userGear = []) => {
         const gustKts = parseFloat(entry.windGusts) || windKts;
         const qualityScore = computeSessionQualityScore(entry);
         const { idealWindShiftKts } = extractNoteSentiment(entry);
-        const pctFoil = parseFloat(entry.foilAnalysis?.stats?.percentFoil ?? entry.computedAnalysis?.stats?.percentFoil);
+        const pctFoil = parseFloat(entry.foilAnalysis?.stats?.percentFoilMoving ?? entry.foilAnalysis?.stats?.percentFoil ?? entry.computedAnalysis?.stats?.percentFoilMoving ?? entry.computedAnalysis?.stats?.percentFoil);
 
         const usedParts = entry.gearUsed.split(/[,+]/).map(s => s.trim()).filter(Boolean);
 
@@ -484,7 +484,7 @@ export const analyzeSpotWindProfile = (sessions = [], locationId = null) => {
     const avgRating = Number((bestMatches.reduce((sum, s) => sum + (Number(s.rating) || 4), 0) / bestMatches.length).toFixed(1));
 
     const foilSamples = bestMatches
-        .map(s => parseFloat(s.foilAnalysis?.stats?.percentFoil))
+        .map(s => parseFloat(s.foilAnalysis?.stats?.percentFoilMoving ?? s.foilAnalysis?.stats?.percentFoil))
         .filter(v => !isNaN(v) && v > 0);
     const avgFoilPct = foilSamples.length > 0
         ? Math.round(foilSamples.reduce((a, b) => a + b, 0) / foilSamples.length)

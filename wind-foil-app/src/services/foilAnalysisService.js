@@ -930,9 +930,24 @@ export const analyzeSession = (streams, options = {}) => {
         }
     }
 
-    const percentFoil = movingTimeSeconds > 0
-        ? ((totalFoilTimeSeconds / movingTimeSeconds) * 100).toFixed(1)
-        : 0;
+    // Total session duration (elapsed time from start to finish)
+    let totalSessionTimeSeconds = 0;
+    if (timeStream.length > 1) {
+        totalSessionTimeSeconds = Math.max(0, timeStream[timeStream.length - 1] - timeStream[0]);
+    }
+    if (totalSessionTimeSeconds <= 0) {
+        totalSessionTimeSeconds = movingTimeSeconds;
+    }
+
+    // % Foil over entire session duration (factoring in resting / waiting / pauses)
+    const percentFoil = totalSessionTimeSeconds > 0
+        ? Math.min(100, Number(((totalFoilTimeSeconds / totalSessionTimeSeconds) * 100).toFixed(1))).toFixed(1)
+        : '0.0';
+
+    // % Foil over moving time (excluding stationary / resting periods)
+    const percentFoilMoving = movingTimeSeconds > 0
+        ? Math.min(100, Number(((totalFoilTimeSeconds / movingTimeSeconds) * 100).toFixed(1))).toFixed(1)
+        : '0.0';
 
     let totalRuns = 0;
     if (mergedSegments.length > 0) {
@@ -994,11 +1009,15 @@ export const analyzeSession = (streams, options = {}) => {
         efficiency,
         stats: {
             totalFoilTime: (totalFoilTimeSeconds / 60).toFixed(1), // minutes
+            sessionDurationMinutes: (totalSessionTimeSeconds / 60).toFixed(1),
+            movingTimeMinutes: (movingTimeSeconds / 60).toFixed(1),
+            restTimeMinutes: Math.max(0, (totalSessionTimeSeconds - movingTimeSeconds) / 60).toFixed(1),
             topSpeed: topSpeedKts,
             topSpeedMs,
             totalDistance: totalDistanceKm,
             numberOfFlights,
             percentFoil,
+            percentFoilMoving,
             totalRuns,
             longestFlightSec,
             longestFlightFormatted: formatDurationSec(longestFlightSec),

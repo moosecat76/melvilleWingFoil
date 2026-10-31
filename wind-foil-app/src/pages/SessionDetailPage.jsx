@@ -40,8 +40,21 @@ const SessionDetailPage = () => {
             if (found) {
                 setEntry(found);
                 let a = found.foilAnalysis;
-                if (found.streams && (!a || !a.adaptiveProfile || !a.maneuvers || !a.efficiency || a.adaptiveProfile.foilArea === undefined)) {
+                if (found.streams && (!a || !a.adaptiveProfile || !a.maneuvers || !a.efficiency || a.adaptiveProfile.foilArea === undefined || a.stats?.percentFoilMoving === undefined)) {
                     a = analyzeSession(found.streams, { windDirection: found.windDirection, gearUsed: found.gearUsed });
+                } else if (a?.stats && a.stats.percentFoilMoving === undefined) {
+                    const rawFoilMin = parseFloat(a.stats.totalFoilTime || 0);
+                    const durationMin = parseFloat(found.activityStats?.duration || 0);
+                    a = {
+                        ...a,
+                        stats: {
+                            ...a.stats,
+                            percentFoilMoving: a.stats.percentFoil,
+                            percentFoil: (durationMin > 0 && rawFoilMin >= 0)
+                                ? Math.min(100, Number(((rawFoilMin / durationMin) * 100).toFixed(1))).toFixed(1)
+                                : a.stats.percentFoil
+                        }
+                    };
                 }
                 setAnalysis(a);
             }
@@ -455,6 +468,11 @@ const SessionDetailPage = () => {
                         <div style={{ background: 'rgba(0,0,0,0.3)', padding: '12px', borderRadius: '8px', textAlign: 'center' }}>
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>% Foil</div>
                             <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#38bdf8' }}>{analysis.stats.percentFoil}%</div>
+                            {analysis.stats.percentFoilMoving && analysis.stats.percentFoilMoving !== analysis.stats.percentFoil && (
+                                <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', marginTop: '2px' }} title="Percentage of active moving time spent on foil (excluding rests)">
+                                    {analysis.stats.percentFoilMoving}% moving
+                                </div>
+                            )}
                         </div>
                         <div style={{ background: 'rgba(0,0,0,0.3)', padding: '12px', borderRadius: '8px', textAlign: 'center' }}>
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Runs</div>

@@ -170,4 +170,41 @@ describe('foilAnalysisService', () => {
         expect(result.maneuvers.completionRate).toBe(50);
         expect(result.efficiency.avgFoilHeartRate).toBeLessThan(result.efficiency.avgPumpHeartRate);
     });
+
+    it('calculates percentFoil across total session duration and provides percentFoilMoving', () => {
+        // 120s total session:
+        // t=0..20: stationary / beach rest (0.1 m/s)
+        // t=21..50: foiling (3.5 m/s) -> 30s foil time
+        // t=51..70: displacement sailing (0.8 m/s) -> 20s moving non-foil
+        // t=71..120: stationary / rest on beach (0.1 m/s) -> 50s rest
+        // Total session: 120s
+        // Total moving time: 30s (foil) + 20s (sailing) = ~50s moving
+        // percentFoil of session = 30 / 120 = 25.0%
+        // percentFoilMoving = 30 / 50 = ~60.0%
+        const n = 121;
+        const time = Array.from({ length: n }, (_, i) => i);
+        const velocity = new Array(n).fill(0.1);
+        const altitude = new Array(n).fill(0);
+
+        for (let t = 21; t <= 50; t++) velocity[t] = 3.5;
+        for (let t = 51; t <= 70; t++) velocity[t] = 0.8;
+
+        const result = analyzeSession({
+            time: { data: time },
+            velocity_smooth: { data: velocity },
+            altitude: { data: altitude },
+        });
+
+        expect(result).not.toBeNull();
+        expect(result.stats.numberOfFlights).toBe(1);
+        expect(result.stats.totalFoilTime).toBe('0.5'); // ~30s = 0.5 min
+        expect(parseFloat(result.stats.percentFoil)).toBeGreaterThanOrEqual(23.0);
+        expect(parseFloat(result.stats.percentFoil)).toBeLessThanOrEqual(26.0);
+        expect(parseFloat(result.stats.percentFoilMoving)).toBeGreaterThanOrEqual(55.0);
+        expect(parseFloat(result.stats.percentFoilMoving)).toBeLessThanOrEqual(65.0);
+        expect(parseFloat(result.stats.percentFoil)).toBeLessThan(parseFloat(result.stats.percentFoilMoving));
+        expect(result.stats.sessionDurationMinutes).toBe('2.0');
+        expect(parseFloat(result.stats.movingTimeMinutes)).toBeGreaterThan(0.7);
+        expect(parseFloat(result.stats.restTimeMinutes)).toBeGreaterThan(1.0);
+    });
 });
