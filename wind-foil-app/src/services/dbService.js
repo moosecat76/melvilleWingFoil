@@ -25,6 +25,7 @@ import {
     orderBy,
     onSnapshot,
     serverTimestamp,
+    writeBatch,
 } from 'firebase/firestore';
 import { db } from './firebaseSetup';
 import { encodePolyline, decodePolyline } from './tcxService';
@@ -341,6 +342,26 @@ export const updateJournalEntry = async (uid, entryId, data) => {
 
 export const deleteJournalEntry = async (uid, entryId) => {
     await deleteDoc(doc(db, 'users', uid, 'journal_entries', entryId));
+};
+
+export const batchUpdateJournalGear = async (uid, sessionUpdates) => {
+    if (!uid || !Array.isArray(sessionUpdates) || sessionUpdates.length === 0) return 0;
+    const CHUNK_SIZE = 400; // firestore limit is 500
+    let updatedCount = 0;
+    for (let i = 0; i < sessionUpdates.length; i += CHUNK_SIZE) {
+        const chunk = sessionUpdates.slice(i, i + CHUNK_SIZE);
+        const batch = writeBatch(db);
+        for (const update of chunk) {
+            const ref = doc(db, 'users', uid, 'journal_entries', update.id);
+            batch.update(ref, {
+                gearUsed: update.newGearUsed ?? update.gearUsed,
+                updatedAt: serverTimestamp(),
+            });
+        }
+        await batch.commit();
+        updatedCount += chunk.length;
+    }
+    return updatedCount;
 };
 
 export const getEntriesForLocation = async (uid, locationId) => {

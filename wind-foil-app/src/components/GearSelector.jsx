@@ -1,13 +1,30 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Save, X } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Plus, Trash2, Save, X, Sparkles } from 'lucide-react';
+import { normalizeSize, normalizeBrandName, deduplicateUserGear } from '../services/quiverService';
 
 const GearSelector = ({ currentGear, onSave, onClose }) => {
     const [items, setItems] = useState(currentGear || []);
     const [newItem, setNewItem] = useState({ type: 'wing', size: '', model: '' });
 
+    const duplicateCount = useMemo(() => {
+        const deduped = deduplicateUserGear(items);
+        return Math.max(0, items.length - deduped.length);
+    }, [items]);
+
     const handleAddItem = () => {
         if (!newItem.size || !newItem.model) return;
-        setItems([...items, { ...newItem, id: Date.now() }]);
+        const cleanSize = normalizeSize(newItem.size);
+        const cleanModel = normalizeBrandName(newItem.model);
+        const cleanType = newItem.type || 'wing';
+
+        const exists = items.some(i =>
+            (i.type || 'wing') === cleanType &&
+            normalizeSize(i.size) === cleanSize &&
+            normalizeBrandName(i.model).toLowerCase() === cleanModel.toLowerCase()
+        );
+        if (exists) return;
+
+        setItems([...items, { type: cleanType, size: cleanSize, model: cleanModel, id: Date.now() }]);
         setNewItem({ type: 'wing', size: '', model: '' });
     };
 
@@ -31,8 +48,33 @@ const GearSelector = ({ currentGear, onSave, onClose }) => {
 
             <h3 className="card-title" style={{ marginBottom: '1rem' }}>Manage My Quiver</h3>
 
+            {duplicateCount > 0 && (
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '6px 10px',
+                    marginBottom: '10px',
+                    background: 'rgba(234, 179, 8, 0.12)',
+                    border: '1px solid rgba(234, 179, 8, 0.35)',
+                    borderRadius: '4px',
+                    fontSize: '0.78rem',
+                    color: '#facc15',
+                }}>
+                    <span>{duplicateCount} duplicate or unnormalized item{duplicateCount > 1 ? 's' : ''} detected</span>
+                    <button
+                        type="button"
+                        onClick={() => setItems(deduplicateUserGear(items))}
+                        className="btn-secondary"
+                        style={{ padding: '2px 8px', fontSize: '0.72rem', color: '#facc15', borderColor: 'rgba(234, 179, 8, 0.4)', cursor: 'pointer' }}
+                    >
+                        Clean Up
+                    </button>
+                </div>
+            )}
+
             {/* List Existing */}
-            <div style={{ marginBottom: '1.5rem', maxHeight: '150px', overflowY: 'auto' }}>
+            <div style={{ marginBottom: '1.5rem', maxHeight: '180px', overflowY: 'auto' }}>
                 {items.length === 0 && <p style={{ color: 'var(--text-secondary)', fontStyle: 'italic' }}>No gear added yet.</p>}
                 {items.map(item => (
                     <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', background: 'var(--bg-secondary)', marginBottom: '0.5rem', borderRadius: '4px' }}>
@@ -42,8 +84,8 @@ const GearSelector = ({ currentGear, onSave, onClose }) => {
                             </span>
                             <span>
                                 <span style={{ fontWeight: 600, color: 'var(--accent-primary)' }}>
-                                    {item.size}{item.type === 'board' ? 'L' : item.type === 'foil' ? 'cm²' : 'm'}
-                                </span> {item.model}
+                                    {normalizeSize(item.size)}{item.type === 'board' ? 'L' : item.type === 'foil' ? 'cm²' : 'm'}
+                                </span> {normalizeBrandName(item.model)}
                             </span>
                         </span>
                         <button onClick={() => handleDelete(item.id)} style={{ background: 'none', border: 'none', color: '#ff4757', cursor: 'pointer' }}>

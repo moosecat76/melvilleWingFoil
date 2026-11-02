@@ -86,13 +86,13 @@ export const computeSessionQualityScore = (entry) => {
     return Math.round(score);
 };
 
+import { formatGearLabel as formatCanonicalGearLabel, normalizeSingleGearName } from './quiverService';
+
 /**
  * Formats a quiver item into its canonical string representation used in `gearUsed`.
  */
 export const formatGearLabel = (gearItem) => {
-    if (!gearItem) return '';
-    const unit = gearItem.type === 'board' ? 'L' : gearItem.type === 'foil' ? 'cm²' : 'm';
-    return `${gearItem.size}${unit} ${gearItem.model || ''}`.trim();
+    return formatCanonicalGearLabel(gearItem);
 };
 
 /**
@@ -131,8 +131,9 @@ export const buildPersonalSweetSpotMatrix = (sessions = [], userGear = []) => {
         const usedParts = entry.gearUsed.split(/[,+]/).map(s => s.trim()).filter(Boolean);
 
         for (const rawPart of usedParts) {
-            const key = rawPart.toLowerCase();
-            let record = matrix.get(key);
+            const canonicalLabel = normalizeSingleGearName(rawPart, userGear);
+            const key = canonicalLabel.toLowerCase();
+            let record = matrix.get(key) || matrix.get(rawPart.toLowerCase());
 
             // Also try fuzzy matching against userGear if exact string slightly differs
             if (!record) {

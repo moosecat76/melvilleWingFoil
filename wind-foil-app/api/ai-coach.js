@@ -249,6 +249,8 @@ export default async function handler(req, res) {
                 '4. RECENT SESSION CONTINUITY: ' +
                 '   - Check `recentSessionAnalysis` (the rider recent debrief, technique focus, tuning recommendation, and power tags). ' +
                 '   - Connect today game plan and water focus to the drill or lesson from their recent session. ' +
+                '5. SELECTED SPOT FOCUS: ' +
+                '   - The rider is physically at `spotName` right now and requesting dockside advice specifically for this spot. Even if another location has better wind, ALWAYS tailor the briefing, rigging, and tactical plan strictly for `spotName` and its forecasted conditions. Do NOT tell them to change locations or drive somewhere else. ' +
                 'Synthesize the forecasted wind speed, gust spread, tide level, recommended quiver setup, past sessions at this spot, and recent coaching focus into a 2-sentence briefing, a gear rigging tip (strictly wing foiling terms), and a key focus.';
         } else {
             return res.status(400).json({ error: `Unsupported mode: ${mode}` });

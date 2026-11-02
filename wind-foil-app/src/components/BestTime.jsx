@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
     suggestBestSessions,
     rankLocationsAndTimes,
     isDirectionInSector,
     analyzeSpotWindProfile,
-    findSimilarPastSessions
+    findSimilarPastSessions,
+    getGearRecommendation
 } from '../services/recommendationService';
 import { generatePreSessionGamePlan } from '../services/aiCoachService';
 import { BadgeCheck, Clock, Wind, Compass, Sparkles, Sliders, Target, MapPin, ArrowRight } from 'lucide-react';
@@ -26,6 +27,11 @@ const BestTime = ({
     const [gamePlan, setGamePlan] = useState(null);
     const [gamePlanLoading, setGamePlanLoading] = useState(false);
     const [scopeMode, setScopeMode] = useState('ALL'); // 'ALL' (across saved spots) | 'CURRENT' (this spot only)
+
+    // Reset game plan whenever the selected location changes so advice is always fresh for the active spot
+    useEffect(() => {
+        setGamePlan(null);
+    }, [locationId]);
 
     const currentSpotBlocks = useMemo(() => {
         if (!forecastHourly) return [];
@@ -63,39 +69,68 @@ const BestTime = ({
         return analyzeSpotWindProfile(sessions, locationId);
     }, [sessions, locationId]);
 
-    if (!blocks || blocks.length === 0) {
-        return (
-            <div className="card">
-                <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <BadgeCheck size={20} />
-                    Best Time &amp; Location to Go
-                </h3>
-                <p style={{ color: 'var(--text-secondary)' }}>
-                    No great sessions projected in next 48h{locationName ? ` at ${locationName}` : ''}.
-                </p>
-                {spotProfile && (
-                    <div style={{ marginTop: '8px', fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <Compass size={14} color="var(--accent-primary)" />
-                        <span>
-                            Your best corridor at {locationName}: <strong>{spotProfile.corridorLabel}</strong> ({spotProfile.avgRating}★ avg across {spotProfile.sessionCount} sessions)
-                        </span>
-                    </div>
-                )}
-            </div>
-        );
-    }
-
-    const topBlocks = blocks.slice(0, 3);
     const speedMult = unit === 'knots' ? 0.539957 : 1;
     const unitLabel = unit === 'knots' ? 'kts' : 'km/h';
 
+    // Helper to extract the best forecast window for the user's SELECTED location
+    // (even if another spot is recommended as the top pick across all spots)
+    const getSelectedLocationBlock = () => {
+        if (currentSpotBlocks && currentSpotBlocks.length > 0) {
+            return currentSpotBlocks[0];
+        }
+
+        // Fallback: If no window met the rating >= 3 threshold (e.g. light wind day),
+        // synthesize a block from the best upcoming daylight window at the selected location
+        if (Array.isArray(forecastHourly) && forecastHourly.length > 0) {
+            const now = new Date();
+            const horizonMs = 48 * 3600 * 1000;
+            const futureDaylightSlots = forecastHourly.filter(slot => {
+                if (!slot || !slot.time) return false;
+                const d = new Date(slot.time);
+                if (d < now || (d.getTime() - now.getTime()) > horizonMs) return false;
+                const hour = d.getHours();
+                return hour >= 6 && hour <= 19;
+            });
+
+            const bestSlot = futureDaylightSlots.length > 0
+                ? [...futureDaylightSlots].sort((a, b) => (b.speed || 0) - (a.speed || 0))[0]
+                : forecastHourly.find(s => new Date(s.time) >= now) || forecastHourly[0];
+
+            if (bestSlot) {
+                const gearRec = getGearRecommendation(bestSlot.speed || 0, userGear, {
+                    sessions,
+                    gustsKmh: bestSlot.gusts,
+                    windDirection: bestSlot.direction
+                });
+
+                return {
+                    start: bestSlot.time,
+                    end: new Date(new Date(bestSlot.time).getTime() + 3600000).toISOString(),
+                    durationHours: 1,
+                    avgSpeed: bestSlot.speed || 0,
+                    avgGusts: bestSlot.gusts || bestSlot.speed || 0,
+                    maxGusts: bestSlot.gusts || bestSlot.speed || 0,
+                    avgDirection: bestSlot.direction || 0,
+                    gear: gearRec,
+                    hourlyData: [bestSlot],
+                    locationId,
+                    locationName
+                };
+            }
+        }
+
+        return null;
+    };
+
     const handleGetGamePlan = async () => {
-        const primary = topBlocks[0];
+        // ALWAYS use the user's selected location for the coach's game plan,
+        // as that is where the rider will be when requesting advice.
+        const primary = getSelectedLocationBlock();
         if (!primary || gamePlanLoading) return;
         setGamePlanLoading(true);
         try {
-            const targetLocId = primary.locationId || locationId;
-            const targetLocName = primary.locationName || locationName;
+            const targetLocId = locationId || primary.locationId;
+            const targetLocName = locationName || primary.locationName || 'Current Spot';
 
             // Extract recent session coaching context
             const sortedByDateDesc = [...(sessions || [])].sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
@@ -148,6 +183,111 @@ const BestTime = ({
         }
     };
 
+    const renderGamePlanSection = () => {
+        if (!gamePlan) return null;
+        return (
+            <div style={{
+                marginBottom: '12px',
+                padding: '12px',
+                borderRadius: '8px',
+                background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.12), rgba(167, 139, 250, 0.08))',
+                border: '1px solid rgba(56, 189, 248, 0.3)'
+            }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <Sparkles size={13} /> Coach's Game Plan
+                        </span>
+                        <span style={{
+                            fontSize: '0.7rem',
+                            fontWeight: 700,
+                            padding: '2px 7px',
+                            borderRadius: '10px',
+                            background: 'rgba(56, 189, 248, 0.2)',
+                            color: '#38bdf8',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px'
+                        }}>
+                            <MapPin size={11} /> {gamePlan.spotName || locationName}
+                        </span>
+                    </div>
+                    {gamePlan.model && (
+                        <span style={{ fontSize: '0.66rem', color: 'var(--text-secondary)' }}>
+                            {gamePlan.model}
+                        </span>
+                    )}
+                </div>
+                <p style={{ margin: '0 0 8px 0', fontSize: '0.84rem', color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                    {gamePlan.briefing}
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px', fontSize: '0.78rem' }}>
+                    {gamePlan.gearTip && (
+                        <div style={{ background: 'rgba(0,0,0,0.22)', padding: '6px 8px', borderRadius: '6px', color: 'var(--text-secondary)' }}>
+                            <strong style={{ color: '#38bdf8' }}><Sliders size={11} style={{ verticalAlign: 'middle' }} /> Rigging:</strong> {gamePlan.gearTip}
+                        </div>
+                    )}
+                    {gamePlan.keyFocus && (
+                        <div style={{ background: 'rgba(0,0,0,0.22)', padding: '6px 8px', borderRadius: '6px', color: 'var(--text-secondary)' }}>
+                            <strong style={{ color: '#4ade80' }}><Target size={11} style={{ verticalAlign: 'middle' }} /> Water Focus:</strong> {gamePlan.keyFocus}
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    };
+
+    if (!blocks || blocks.length === 0) {
+        return (
+            <div className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+                    <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                        <BadgeCheck size={20} />
+                        Best Time &amp; Location to Go
+                    </h3>
+                    {forecastHourly && forecastHourly.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={handleGetGamePlan}
+                            disabled={gamePlanLoading}
+                            title={`Get coach advice for ${locationName}`}
+                            style={{
+                                fontSize: '0.74rem',
+                                fontWeight: 600,
+                                padding: '4px 10px',
+                                borderRadius: '12px',
+                                border: '1px solid rgba(56, 189, 248, 0.45)',
+                                background: 'rgba(56, 189, 248, 0.16)',
+                                color: '#38bdf8',
+                                cursor: gamePlanLoading ? 'wait' : 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                            }}
+                        >
+                            <Sparkles size={12} />
+                            {gamePlanLoading ? 'Briefing…' : gamePlan ? 'Refresh Game Plan' : `Game Plan for ${locationName}`}
+                        </button>
+                    )}
+                </div>
+                {renderGamePlanSection()}
+                <p style={{ color: 'var(--text-secondary)' }}>
+                    No great sessions projected in next 48h{locationName ? ` at ${locationName}` : ''}.
+                </p>
+                {spotProfile && (
+                    <div style={{ marginTop: '8px', fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Compass size={14} color="var(--accent-primary)" />
+                        <span>
+                            Your best corridor at {locationName}: <strong>{spotProfile.corridorLabel}</strong> ({spotProfile.avgRating}★ avg across {spotProfile.sessionCount} sessions)
+                        </span>
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    const topBlocks = blocks.slice(0, 3);
+
     return (
         <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
@@ -185,6 +325,7 @@ const BestTime = ({
                         type="button"
                         onClick={handleGetGamePlan}
                         disabled={gamePlanLoading}
+                        title={`Get dockside coach game plan for ${locationName}`}
                         style={{
                             fontSize: '0.74rem',
                             fontWeight: 600,
@@ -200,7 +341,7 @@ const BestTime = ({
                         }}
                     >
                         <Sparkles size={12} />
-                        {gamePlanLoading ? 'Briefing…' : gamePlan ? 'Refresh Game Plan' : "Get Coach's Game Plan"}
+                        {gamePlanLoading ? 'Briefing…' : gamePlan ? 'Refresh Game Plan' : `Game Plan for ${locationName}`}
                     </button>
                 </div>
             </div>
@@ -264,42 +405,8 @@ const BestTime = ({
                 </div>
             )}
 
-            {/* Phase 5.3: Pre-Session Coach's Game Plan */}
-            {gamePlan && (
-                <div style={{
-                    marginBottom: '12px',
-                    padding: '12px',
-                    borderRadius: '8px',
-                    background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.12), rgba(167, 139, 250, 0.08))',
-                    border: '1px solid rgba(56, 189, 248, 0.3)'
-                }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                            <Sparkles size={13} /> Coach's Game Plan
-                        </span>
-                        {gamePlan.model && (
-                            <span style={{ fontSize: '0.66rem', color: 'var(--text-secondary)' }}>
-                                {gamePlan.model}
-                            </span>
-                        )}
-                    </div>
-                    <p style={{ margin: '0 0 8px 0', fontSize: '0.84rem', color: 'var(--text-primary)', lineHeight: 1.5 }}>
-                        {gamePlan.briefing}
-                    </p>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px', fontSize: '0.78rem' }}>
-                        {gamePlan.gearTip && (
-                            <div style={{ background: 'rgba(0,0,0,0.22)', padding: '6px 8px', borderRadius: '6px', color: 'var(--text-secondary)' }}>
-                                <strong style={{ color: '#38bdf8' }}><Sliders size={11} style={{ verticalAlign: 'middle' }} /> Rigging:</strong> {gamePlan.gearTip}
-                            </div>
-                        )}
-                        {gamePlan.keyFocus && (
-                            <div style={{ background: 'rgba(0,0,0,0.22)', padding: '6px 8px', borderRadius: '6px', color: 'var(--text-secondary)' }}>
-                                <strong style={{ color: '#4ade80' }}><Target size={11} style={{ verticalAlign: 'middle' }} /> Water Focus:</strong> {gamePlan.keyFocus}
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
+            {/* Pre-Session Coach's Game Plan (Always grounded in the selected location) */}
+            {renderGamePlanSection()}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {topBlocks.map((block, idx) => {

@@ -8,6 +8,7 @@ import SessionMap from './SessionMap';
 import { analyzeSession } from '../services/foilAnalysisService';
 import FoilAnalysisChart from './FoilAnalysisChart';
 import HeartRateChart from './HeartRateChart';
+import { formatGearLabel } from '../services/quiverService';
 
 // Helper to calculate statistics (Legacy wrapper for backward compatibility or simple quick stats)
 const legacyCalculateStats = (streams, maxSpeedMs = 0, distanceMeters = 0) => {
@@ -43,13 +44,16 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
     });
 
     const handleAddGearToEntry = (gearItem) => {
-        const unit = gearItem.type === 'board' ? 'L' : gearItem.type === 'foil' ? 'cm²' : 'm';
-        const gearString = `${gearItem.size}${unit} ${gearItem.model}`;
+        const gearString = formatGearLabel(gearItem);
+        if (!gearString) return;
         setNewEntry(prev => {
             const current = prev.gearUsed;
+            if (!current) return { ...prev, gearUsed: gearString };
+            const parts = current.split(/[,+]/).map(s => s.trim());
+            if (parts.includes(gearString)) return prev;
             return {
                 ...prev,
-                gearUsed: current ? `${current}, ${gearString}` : gearString
+                gearUsed: `${current}, ${gearString}`
             };
         });
     };

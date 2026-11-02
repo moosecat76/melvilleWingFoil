@@ -358,6 +358,7 @@ export const buildDeterministicGamePlan = (payload) => {
     }
 
     return {
+        spotName,
         briefing,
         gearTip,
         keyFocus,
@@ -451,6 +452,7 @@ export const generatePreSessionGamePlan = async (contextPayload) => {
         if (!result.fallback && result.data) {
             return {
                 ...result.data,
+                spotName: contextPayload.spotName,
                 source: 'gemini',
                 model: result.model || 'gemini-3.5-flash-lite',
                 generatedAt: new Date().toISOString()
@@ -459,5 +461,9 @@ export const generatePreSessionGamePlan = async (contextPayload) => {
     } catch (err) {
         console.warn('[aiCoachService] Falling back to local game plan engine:', err.message);
     }
-    return buildDeterministicGamePlan(contextPayload);
+    const local = buildDeterministicGamePlan(contextPayload);
+    return {
+        ...local,
+        spotName: contextPayload.spotName
+    };
 };

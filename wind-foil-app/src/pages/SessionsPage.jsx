@@ -13,6 +13,7 @@ import { useNavigate } from 'react-router-dom';
 import { getWeatherForecast, getTideForecast, processChartData } from '../services/weatherService';
 import { fetchRecentSessions, fetchSessionTelemetry, relabelActivityType, sessionEmoji } from '../services/googleFitService';
 import PolylineThumbnail from '../components/PolylineThumbnail';
+import { formatGearLabel } from '../services/quiverService';
 
 const SessionMap = lazy(() => import('../components/SessionMap'));
 const FoilAnalysisChart = lazy(() => import('../components/FoilAnalysisChart'));
@@ -120,13 +121,16 @@ const SessionsPage = () => {
     });
 
     const handleAddGearToEntry = (gearItem) => {
-        const unit = gearItem.type === 'board' ? 'L' : gearItem.type === 'foil' ? 'cm²' : 'm';
-        const gearString = `${gearItem.size}${unit} ${gearItem.model}`;
+        const gearString = formatGearLabel(gearItem);
+        if (!gearString) return;
         setNewEntry(prev => {
             const current = prev.gearUsed;
+            if (!current) return { ...prev, gearUsed: gearString };
+            const parts = current.split(/[,+]/).map(s => s.trim());
+            if (parts.includes(gearString)) return prev;
             return {
                 ...prev,
-                gearUsed: current ? `${current}, ${gearString}` : gearString
+                gearUsed: `${current}, ${gearString}`
             };
         });
     };

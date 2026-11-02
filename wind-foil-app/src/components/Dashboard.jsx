@@ -262,6 +262,10 @@ const Dashboard = () => {
                         userGear={userGear}
                         idealWindDirection={currentLocation.idealWindDirection}
                         daily={daily}
+                        unit={unit}
+                        locationId={currentLocation.id}
+                        locationName={currentLocation.name}
+                        currentTide={current?.tide}
                     />
                 </div>
 

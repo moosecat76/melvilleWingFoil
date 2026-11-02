@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Trophy, TrendingUp, Layers, Zap, Wind, Award, Calendar, Compass } from 'lucide-react';
+import { Trophy, TrendingUp, Layers, Zap, Wind, Award, Calendar, Compass, Sparkles, AlertCircle } from 'lucide-react';
 import {
     ResponsiveContainer, ComposedChart, Line, Bar, XAxis, YAxis,
     CartesianGrid, Tooltip
@@ -9,7 +9,10 @@ import { format } from 'date-fns';
 import { useAuth } from '../context/AuthContext';
 import { usePreferences } from '../context/PreferencesContext';
 import { subscribeToJournalEntries } from '../services/journalService';
+import { subscribeToUserGear } from '../services/dbService';
 import { analyzeSession, formatDurationSec } from '../services/foilAnalysisService';
+import { normalizeSingleGearName, analyzeQuiverRationalisation } from '../services/quiverService';
+import QuiverRationaliserModal from '../components/QuiverRationaliserModal';
 
 const safeFormatDate = (dateVal, fmt) => {
     try {
@@ -31,7 +34,9 @@ const StatsPage = () => {
     const ktsToUnit = unit === 'kmh' ? 1.852 : 1;
 
     const [entries, setEntries] = useState([]);
+    const [userGear, setUserGear] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [showRationaliser, setShowRationaliser] = useState(false);
 
     useEffect(() => {
         if (authLoading) return;
@@ -43,11 +48,21 @@ const StatsPage = () => {
                 setLoading(false);
             }
         });
+        const unsubGear = subscribeToUserGear(user?.uid, (data) => {
+            if (mounted) {
+                setUserGear(data || []);
+            }
+        });
         return () => {
             mounted = false;
             if (typeof unsubscribe === 'function') unsubscribe();
+            if (typeof unsubGear === 'function') unsubGear();
         };
     }, [user?.uid, authLoading]);
+
+    const quiverAnalysis = useMemo(() => {
+        return analyzeQuiverRationalisation(entries, userGear);
+    }, [entries, userGear]);
 
     // Enrich entries with computed foilAnalysis (including maneuvers & longestFlightSec)
     const enrichedSessions = useMemo(() => {
@@ -206,7 +221,8 @@ const StatsPage = () => {
 
         for (const s of enrichedSessions) {
             if (!s.gearUsed || typeof s.gearUsed !== 'string') continue;
-            const items = s.gearUsed.split(',').map(g => g.trim()).filter(Boolean);
+            const rawItems = s.gearUsed.split(/[,+]/).map(g => g.trim()).filter(Boolean);
+            const items = Array.from(new Set(rawItems.map(g => normalizeSingleGearName(g, userGear))));
             const st = s.computedAnalysis?.stats || {};
             const act = s.activityStats || {};
 
@@ -261,7 +277,7 @@ const StatsPage = () => {
                 avgRating: r.ratingCount > 0 ? (r.ratingSum / r.ratingCount).toFixed(1) : null,
             }))
             .sort((a, b) => b.sessions - a.sessions);
-    }, [enrichedSessions]);
+    }, [enrichedSessions, userGear]);
 
     if (loading) {
         return (
@@ -462,9 +478,73 @@ const StatsPage = () => {
 
                     {/* ── Quiver Usage & Performance Breakdown ── */}
                     <div className="glass-panel" style={{ padding: '20px' }}>
-                        <h3 style={{ margin: '0 0 12px 0', fontSize: '1.05rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <Layers size={18} color="#a78bfa" /> Quiver Usage & Gear Performance
-                        </h3>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                            <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <Layers size={18} color="#a78bfa" /> Quiver Usage & Gear Performance
+                            </h3>
+                            <button
+                                type="button"
+                                onClick={() => setShowRationaliser(true)}
+                                className="btn-secondary"
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    padding: '5px 12px',
+                                    fontSize: '0.8rem',
+                                    borderRadius: '6px',
+                                    borderColor: quiverAnalysis.hasChanges ? 'var(--accent-primary)' : 'var(--border-color)',
+                                    color: quiverAnalysis.hasChanges ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                                    cursor: 'pointer',
+                                }}
+                            >
+                                <Sparkles size={14} />
+                                {quiverAnalysis.hasChanges ? `Rationalise Quiver (${quiverAnalysis.totalAffectedSessions} to merge)` : 'Quiver Clean'}
+                            </button>
+                        </div>
+
+                        {quiverAnalysis.hasChanges && (
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '10px 14px',
+                                marginBottom: '14px',
+                                background: 'rgba(234, 179, 8, 0.12)',
+                                border: '1px solid rgba(234, 179, 8, 0.35)',
+                                borderRadius: '6px',
+                                fontSize: '0.82rem',
+                                color: '#facc15',
+                                flexWrap: 'wrap',
+                                gap: '8px',
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                                    <span>
+                                        <strong>{quiverAnalysis.totalAffectedSessions} session{quiverAnalysis.totalAffectedSessions === 1 ? '' : 's'}</strong> have duplicate or misspelled gear tags. Rationalising merges them cleanly without losing any session data.
+                                    </span>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowRationaliser(true)}
+                                    style={{
+                                        background: 'var(--accent-primary)',
+                                        color: '#000',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        padding: '4px 10px',
+                                        fontSize: '0.78rem',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                    }}
+                                >
+                                    <Sparkles size={13} /> Review & Rationalise
+                                </button>
+                            </div>
+                        )}
 
                         {quiverStats.length === 0 ? (
                             <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', margin: 0 }}>
@@ -511,6 +591,17 @@ const StatsPage = () => {
                     </div>
                 </>
             )}
+
+            <QuiverRationaliserModal
+                isOpen={showRationaliser}
+                onClose={() => setShowRationaliser(false)}
+                sessions={entries}
+                userGear={userGear}
+                uid={user?.uid}
+                onSuccess={({ cleanedUserGear }) => {
+                    if (cleanedUserGear) setUserGear(cleanedUserGear);
+                }}
+            />
         </div>
     );
 };
