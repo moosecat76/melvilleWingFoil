@@ -245,7 +245,7 @@ export const deduplicateUserGear = (userGear = []) => {
         if (!seen.has(key)) {
             seen.set(key, {
                 ...item,
-                id: item.id || Date.now() + Math.random(),
+                id: item.id || `gear_${type}_${size}_${model.toLowerCase().replace(/\s+/g, '_')}`,
                 type,
                 size,
                 model,
@@ -293,8 +293,8 @@ export const analyzeQuiverRationalisation = (sessions = [], userGear = []) => {
     }
 
     const replacementList = Array.from(replacements.values()).sort((a, b) => b.count - a.count);
-    const userGearChanged = JSON.stringify(userGear) !== JSON.stringify(cleanedUserGear);
-    const hasChanges = sessionUpdates.length > 0 || userGearChanged;
+    const userGearChanged = userGear.length !== cleanedUserGear.length;
+    const hasChanges = sessionUpdates.length > 0;
 
     return {
         hasChanges,
@@ -304,5 +304,6 @@ export const analyzeQuiverRationalisation = (sessions = [], userGear = []) => {
         cleanedUserGear,
         originalUserGearCount: userGear.length,
         cleanedUserGearCount: cleanedUserGear.length,
+        userGearChanged,
     };
 };

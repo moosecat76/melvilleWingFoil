@@ -125,5 +125,21 @@ describe('quiverService', () => {
             const rep5m = plan.replacementList.find(r => r.canonical === '5m Cabrinha');
             expect(rep5m).toBeDefined();
         });
+
+        it('returns hasChanges: false and totalAffectedSessions: 0 when all sessions are clean', () => {
+            const sessions = [
+                { id: 's1', date: '2026-01-01', gearUsed: '5m Cabrinha, 1850cm² Neil Pryde' },
+                { id: 's2', date: '2026-01-02', gearUsed: '6m Cabrinha, 100L Smik' },
+            ];
+            const userGear = [
+                { id: 1, type: 'wing', size: '5', model: 'Cabrinha' },
+                { id: 2, type: 'wing', size: '6', model: 'Cabrinha' },
+            ];
+
+            const plan = analyzeQuiverRationalisation(sessions, userGear);
+            expect(plan.hasChanges).toBe(false);
+            expect(plan.totalAffectedSessions).toBe(0);
+            expect(plan.sessionUpdates).toHaveLength(0);
+        });
     });
 });

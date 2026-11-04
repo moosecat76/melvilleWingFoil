@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation } from '../context/LocationContext';
 import { useAuth } from '../context/AuthContext';
 import { getJournalEntries, addJournalEntry, deleteJournalEntry, updateJournalEntry } from '../services/journalService';
+import { isSameJournalEntry } from '../services/dbService';
 import { Book, Plus, Trash2, Edit2, Calendar, Wind, Clock, MapPin, X, Activity } from 'lucide-react';
 import { format } from 'date-fns';
 import SessionMap from './SessionMap';
@@ -24,6 +25,8 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
     const { user, loading: authLoading } = useAuth();
     const [entries, setEntries] = useState([]);
     const [isAdding, setIsAdding] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+    const isSavingRef = useRef(false);
     const [editId, setEditId] = useState(null);
     const [activeTab, setActiveTab] = useState('details');
     const [stravaConnected, setStravaConnected] = useState(false);
@@ -93,6 +96,9 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
 
     const handleAdd = async (e) => {
         e.preventDefault();
+        if (isSavingRef.current) return;
+        isSavingRef.current = true;
+        setIsSaving(true);
 
         const entryData = {
             locationId: currentLocation.id,
@@ -111,21 +117,29 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
             foilAnalysis: newEntry.foilAnalysis
         };
 
-        if (editId) {
-            const updated = await updateJournalEntry({ ...entryData, id: editId }, user?.uid);
-            if (updated) {
-                setEntries(entries.map(e => e.id === editId ? updated : e));
+        try {
+            if (editId) {
+                const updated = await updateJournalEntry({ ...entryData, id: editId }, user?.uid);
+                if (updated) {
+                    setEntries(prev => prev.map(item => String(item.id) === String(editId) ? updated : item));
+                }
+            } else {
+                const added = await addJournalEntry(entryData, user?.uid);
+                setEntries(prev => [
+                    added,
+                    ...prev.filter(item => String(item.id) !== String(added.id) && !isSameJournalEntry(item, added))
+                ]);
             }
-        } else {
-            const added = await addJournalEntry(entryData, user?.uid);
-            setEntries([added, ...entries]);
-        }
 
-        // Reset
-        setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '', stravaActivityId: null, mapPolyline: null, activityStats: null, foilAnalysis: null });
-        setIsAdding(false);
-        setEditId(null);
-        setShowActivityPicker(false);
+            // Reset
+            setNewEntry({ notes: '', rating: 5, gearUsed: '', windSpeed: '', windGusts: '', windDirection: '', stravaActivityId: null, mapPolyline: null, activityStats: null, foilAnalysis: null });
+            setIsAdding(false);
+            setEditId(null);
+            setShowActivityPicker(false);
+        } finally {
+            isSavingRef.current = false;
+            setIsSaving(false);
+        }
     };
 
     const handleEdit = (entry) => {
@@ -499,7 +513,14 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                         </div>
                     )}
 
-                    <button type="submit" className="btn-primary" style={{ marginTop: '16px' }}>{editId ? 'Update Entry' : 'Save Entry'}</button>
+                    <button
+                        type="submit"
+                        disabled={isSaving}
+                        className="btn-primary"
+                        style={{ marginTop: '16px', opacity: isSaving ? 0.65 : 1, cursor: isSaving ? 'not-allowed' : 'pointer' }}
+                    >
+                        {isSaving ? (editId ? 'Updating Entry…' : 'Saving Entry…') : (editId ? 'Update Entry' : 'Save Entry')}
+                    </button>
                 </form>
             )}
 
@@ -511,7 +532,8 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
                         <div key={entry.id} style={{
                             padding: '12px',
                             borderBottom: '1px solid rgba(255,255,255,0.1)',
-                            marginBottom: '8px'
+                            marginBottom: '8px',
+                            overflow: 'hidden'
                         }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
                                 <span style={{ fontSize: '0.75rem', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', gap: '4px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -528,15 +550,15 @@ const Journal = ({ weatherData, userGear = [], onAddGear }) => {
 
                             {/* Weather Snapshot */}
                             {(entry.windSpeed || entry.windDirection) && (
-                                <div style={{ display: 'flex', gap: '10px', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '6px', background: 'rgba(0,0,0,0.2)', padding: '4px', borderRadius: '4px' }}>
+                                <div style={{ display: 'flex', gap: '10px', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '6px', background: 'rgba(0,0,0,0.2)', padding: '4px', borderRadius: '4px', flexWrap: 'wrap' }}>
                                     {entry.windSpeed && <span><Wind size={12} style={{ display: 'inline' }} /> {entry.windSpeed} kts</span>}
                                     {entry.windGusts && <span>(Gust {entry.windGusts})</span>}
                                     {entry.windDirection && <span>{entry.windDirection}°</span>}
                                 </div>
                             )}
 
-                            <p style={{ margin: '4px 0' }}>{entry.notes}</p>
-                            {entry.gearUsed && <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: 0 }}>Gear: {entry.gearUsed}</p>}
+                            <p style={{ margin: '4px 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{entry.notes}</p>
+                            {entry.gearUsed && <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: 0, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>Gear: {entry.gearUsed}</p>}
 
                             {/* Map Visualization & Stats */}
                             {entry.mapPolyline && (

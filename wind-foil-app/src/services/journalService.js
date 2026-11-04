@@ -8,10 +8,23 @@ import {
     prepareJournalEntryForFirestore,
     hydrateJournalEntry,
     isSameJournalEntry,
+    normalizeEntryDate,
 } from './dbService';
 
 const STORAGE_KEY = 'wind_foil_journal_entries';
 const DELETED_IDS_KEY = 'wind_foil_deleted_ids';
+
+// Tracks in-flight add operations by entry fingerprint so concurrent saves or
+// snapshot listeners never create duplicate Firestore documents.
+const inFlightAdds = new Map();
+
+const getEntryFingerprint = (entry) => {
+    if (!entry) return '';
+    const date = normalizeEntryDate(entry) || entry.date || '';
+    const loc = entry.locationId || '';
+    const notes = (entry.notes || '').trim();
+    return `${date}::${loc}::${notes}`;
+};
 
 /**
  * Checks if two journal entries refer to the same logged session.
@@ -88,7 +101,16 @@ const sortByDateDesc = (entries) => {
 const mergeCloudAndLocalEntries = (cloudEntries = [], uid = null, allowBackgroundPush = true) => {
     const deletedIds = getDeletedIds();
     const localEntries = getLocalEntries();
-    const merged = cloudEntries.filter((e) => !e?.id || !deletedIds.has(String(e.id)));
+    const filteredCloud = cloudEntries.filter((e) => !e?.id || !deletedIds.has(String(e.id)));
+
+    // Deduplicate cloud entries that represent the exact same session (e.g. from prior rapid clicks)
+    const merged = [];
+    for (const cloudEntry of filteredCloud) {
+        if (!merged.some((existing) => isSameEntry(existing, cloudEntry))) {
+            merged.push(cloudEntry);
+        }
+    }
+
     let localChanged = false;
 
     for (const localEntry of localEntries) {
@@ -98,8 +120,9 @@ const mergeCloudAndLocalEntries = (cloudEntries = [], uid = null, allowBackgroun
             const hydratedLocal = hydrateJournalEntry(localEntry);
             merged.push(hydratedLocal);
             localChanged = true;
-            if (uid && allowBackgroundPush) {
-                dbAddJournalEntry(uid, localEntry)
+            const fp = getEntryFingerprint(localEntry);
+            if (uid && allowBackgroundPush && !inFlightAdds.has(fp)) {
+                const bgPromise = dbAddJournalEntry(uid, localEntry)
                     .then((synced) => {
                         // Replace local temporary ID with Firestore ID in localStorage cache
                         const currentLocal = getLocalEntries();
@@ -107,10 +130,15 @@ const mergeCloudAndLocalEntries = (cloudEntries = [], uid = null, allowBackgroun
                             isSameEntry(item, localEntry) ? { ...item, id: synced.id } : item
                         );
                         saveLocalEntries(updated);
+                        return synced;
                     })
-                    .catch((err) =>
-                        console.warn('[journalService] Failed to background-sync local entry:', err)
-                    );
+                    .catch((err) => {
+                        console.warn('[journalService] Failed to background-sync local entry:', err);
+                    })
+                    .finally(() => {
+                        inFlightAdds.delete(fp);
+                    });
+                inFlightAdds.set(fp, bgPromise);
             }
         } else if (!merged[idx].streams && localEntry.streams) {
             const enriched = hydrateJournalEntry({
@@ -204,34 +232,56 @@ export const subscribeToJournalEntries = (uid, onUpdate) => {
 };
 
 export const addJournalEntry = async (entry, uid = null) => {
-    const entries = getLocalEntries();
     const optimisticEntry = hydrateJournalEntry({
         id: entry.id || Date.now().toString(),
         date: entry.date || new Date().toISOString(),
         ...entry,
     });
 
-    // 1. Always write to localStorage immediately so closing the mobile tab never loses the session
-    const dedupedLocal = [optimisticEntry, ...entries.filter((e) => !isSameEntry(e, optimisticEntry))];
-    saveLocalEntries(dedupedLocal);
-
-    // 2. Sync to Firestore if signed in
-    if (uid) {
-        try {
-            const added = await dbAddJournalEntry(uid, optimisticEntry);
-            const hydratedCloud = hydrateJournalEntry(added);
-            const syncedLocal = dedupedLocal.map((e) =>
-                isSameEntry(e, optimisticEntry) ? hydratedCloud : e
-            );
-            saveLocalEntries(syncedLocal);
-            return hydratedCloud;
-        } catch (err) {
-            console.warn('[journalService] Cloud save deferred (saved locally and will sync on next connection):', err);
-            return optimisticEntry;
-        }
+    const fp = getEntryFingerprint(optimisticEntry);
+    if (fp && inFlightAdds.has(fp)) {
+        return inFlightAdds.get(fp);
     }
 
-    return optimisticEntry;
+    const performAdd = async () => {
+        const entries = getLocalEntries();
+        const existing = entries.find((e) => isSameEntry(e, optimisticEntry));
+
+        // 1. Always write to localStorage immediately so closing the mobile tab never loses the session
+        const entryToSave = existing ? hydrateJournalEntry({ ...existing, ...entry, id: existing.id }) : optimisticEntry;
+        const dedupedLocal = [entryToSave, ...entries.filter((e) => !isSameEntry(e, optimisticEntry))];
+        saveLocalEntries(dedupedLocal);
+
+        // 2. Sync to Firestore if signed in
+        if (uid) {
+            try {
+                const added = await dbAddJournalEntry(uid, entryToSave);
+                const hydratedCloud = hydrateJournalEntry(added);
+                const currentLocal = getLocalEntries();
+                const syncedLocal = [
+                    hydratedCloud,
+                    ...currentLocal.filter((e) => !isSameEntry(e, optimisticEntry) && String(e.id) !== String(hydratedCloud.id)),
+                ];
+                saveLocalEntries(syncedLocal);
+                return hydratedCloud;
+            } catch (err) {
+                console.warn('[journalService] Cloud save deferred (saved locally and will sync on next connection):', err);
+                return entryToSave;
+            }
+        }
+
+        return entryToSave;
+    };
+
+    const promise = performAdd().finally(() => {
+        if (fp) inFlightAdds.delete(fp);
+    });
+
+    if (fp) {
+        inFlightAdds.set(fp, promise);
+    }
+
+    return promise;
 };
 
 export const deleteJournalEntry = async (id, uid = null) => {

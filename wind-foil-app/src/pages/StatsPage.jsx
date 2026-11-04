@@ -493,17 +493,17 @@ const StatsPage = () => {
                                     padding: '5px 12px',
                                     fontSize: '0.8rem',
                                     borderRadius: '6px',
-                                    borderColor: quiverAnalysis.hasChanges ? 'var(--accent-primary)' : 'var(--border-color)',
-                                    color: quiverAnalysis.hasChanges ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                                    borderColor: quiverAnalysis.totalAffectedSessions > 0 ? 'var(--accent-primary)' : 'var(--border-color)',
+                                    color: quiverAnalysis.totalAffectedSessions > 0 ? 'var(--accent-primary)' : 'var(--text-secondary)',
                                     cursor: 'pointer',
                                 }}
                             >
                                 <Sparkles size={14} />
-                                {quiverAnalysis.hasChanges ? `Rationalise Quiver (${quiverAnalysis.totalAffectedSessions} to merge)` : 'Quiver Clean'}
+                                {quiverAnalysis.totalAffectedSessions > 0 ? `Rationalise Quiver (${quiverAnalysis.totalAffectedSessions} to merge)` : 'Quiver Clean'}
                             </button>
                         </div>
 
-                        {quiverAnalysis.hasChanges && (
+                        {quiverAnalysis.totalAffectedSessions > 0 && (
                             <div style={{
                                 display: 'flex',
                                 alignItems: 'center',

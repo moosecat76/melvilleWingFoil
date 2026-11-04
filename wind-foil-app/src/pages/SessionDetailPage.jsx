@@ -304,7 +304,7 @@ const SessionDetailPage = () => {
                     {entry.notes && (
                         <div style={{ marginBottom: (entry.gearUsed || coachTags) ? '12px' : 0 }}>
                             <h3 style={{ margin: '0 0 6px 0', fontSize: '1rem', fontWeight: 600 }}>Notes</h3>
-                            <p style={{ margin: 0, color: 'var(--text-secondary)', lineHeight: 1.6 }}>{entry.notes}</p>
+                            <p style={{ margin: 0, color: 'var(--text-secondary)', lineHeight: 1.6, wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{entry.notes}</p>
                         </div>
                     )}
                     {entry.gearUsed && (

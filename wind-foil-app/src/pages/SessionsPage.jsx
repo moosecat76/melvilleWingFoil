@@ -1,9 +1,9 @@
-import React, { useState, useEffect, lazy, Suspense, useMemo } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense, useMemo } from 'react';
 import { useLocation } from '../context/LocationContext';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { getJournalEntries, subscribeToJournalEntries, addJournalEntry, deleteJournalEntry, updateJournalEntry } from '../services/journalService';
-import { getUserGear, subscribeToUserGear } from '../services/dbService';
+import { getUserGear, subscribeToUserGear, isSameJournalEntry } from '../services/dbService';
 import { Book, Plus, Trash2, Edit2, Calendar, Wind, Clock, MapPin, X, ChevronRight, Search, Activity, FileText, CheckCircle2, RotateCcw, Sparkles, RefreshCw, Cloud, LogIn } from 'lucide-react';
 import { format } from 'date-fns';
 import { parseGpsFile } from '../services/tcxService';
@@ -53,6 +53,8 @@ const SessionsPage = () => {
     const { showToast } = useToast();
     const [confirmDeleteId, setConfirmDeleteId] = useState(null);
     const [isSyncing, setIsSyncing] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+    const isSavingRef = useRef(false);
     const navigate = useNavigate();
     const [entries, setEntries] = useState([]);
     const [isAdding, setIsAdding] = useState(false);
@@ -194,6 +196,9 @@ const SessionsPage = () => {
 
     const handleAdd = async (e) => {
         e.preventDefault();
+        if (isSavingRef.current) return;
+        isSavingRef.current = true;
+        setIsSaving(true);
 
         const entryData = {
             locationId: currentLocation.id,
@@ -225,12 +230,15 @@ const SessionsPage = () => {
             if (editId) {
                 const updated = await updateJournalEntry({ ...entryData, id: editId }, user?.uid);
                 if (updated) {
-                    setEntries(entries.map(e => e.id === editId ? updated : e));
+                    setEntries(prev => prev.map(item => String(item.id) === String(editId) ? updated : item));
                 }
                 showToast('Session & AI Coach tags updated!', 'success');
             } else {
                 const added = await addJournalEntry(entryData, user?.uid);
-                setEntries([added, ...entries]);
+                setEntries(prev => [
+                    added,
+                    ...prev.filter(item => String(item.id) !== String(added.id) && !isSameJournalEntry(item, added))
+                ]);
                 showToast('Session logged & analyzed by AI Coach!', 'success');
             }
 
@@ -243,6 +251,9 @@ const SessionsPage = () => {
         } catch (err) {
             console.error('Failed to save journal entry:', err);
             showToast('Failed to save entry: ' + err.message, 'error');
+        } finally {
+            isSavingRef.current = false;
+            setIsSaving(false);
         }
     };
 
@@ -913,21 +924,26 @@ const SessionsPage = () => {
                     <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '8px' }}>
                         <button
                             type="button"
+                            disabled={isSaving}
                             onClick={() => {
                                 setIsAdding(false);
                                 setEditId(null);
                             }}
                             className="btn-secondary"
-                            style={{ padding: '10px 18px' }}
+                            style={{ padding: '10px 18px', opacity: isSaving ? 0.6 : 1, cursor: isSaving ? 'not-allowed' : 'pointer' }}
                         >
                             Cancel
                         </button>
                         <button
                             type="submit"
+                            disabled={isSaving}
                             className="btn-primary"
-                            style={{ padding: '10px 24px' }}
+                            style={{ padding: '10px 24px', opacity: isSaving ? 0.65 : 1, cursor: isSaving ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
                         >
-                            {editId ? 'Update Session' : 'Save Session'}
+                            {isSaving && <RefreshCw size={15} className="spin" />}
+                            {isSaving
+                                ? (editId ? 'Updating Session…' : 'Saving Session…')
+                                : (editId ? 'Update Session' : 'Save Session')}
                         </button>
                     </div>
                 </form>
@@ -1049,11 +1065,11 @@ const SessionsPage = () => {
                                 <div
                                     key={entry.id || `${entry.date}-${index}`}
                                     className="glass-panel"
-                                    style={{ padding: '16px', cursor: 'pointer', transition: 'border-color 0.2s' }}
+                                    style={{ padding: '16px', cursor: 'pointer', transition: 'border-color 0.2s', overflow: 'hidden', width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}
                                     onClick={() => navigate(`/session/${entry.id}`)}
                                 >
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                        <div style={{ flex: 1 }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', width: '100%', maxWidth: '100%' }}>
+                                        <div style={{ flex: 1, minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
                                             {/* Location */}
                                             <div style={{ fontSize: '0.7rem', color: 'var(--accent-primary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                                                 <MapPin size={10} /> {entry.locationName || 'Unknown Location'}
@@ -1079,16 +1095,24 @@ const SessionsPage = () => {
 
                                             {/* Wind Snapshot */}
                                             {(entry.windSpeed || entry.windDirection) && (
-                                                <div style={{ display: 'flex', gap: '8px', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                                                <div style={{ display: 'flex', gap: '8px', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '4px', flexWrap: 'wrap' }}>
                                                     {entry.windSpeed && <span><Wind size={12} style={{ display: 'inline', verticalAlign: 'middle' }} /> {entry.windSpeed} kts</span>}
                                                     {entry.windGusts && <span>(Gust {entry.windGusts})</span>}
                                                     {entry.windDirection && <span>{entry.windDirection}°</span>}
                                                 </div>
                                             )}
 
-                                            {/* Notes preview */}
+                                            {/* Notes description preview */}
                                             {entry.notes && (
-                                                <p style={{ margin: '4px 0', fontSize: '0.85rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '85%' }}>
+                                                <p style={{
+                                                    margin: '6px 0 4px',
+                                                    fontSize: '0.85rem',
+                                                    color: 'var(--text-secondary)',
+                                                    lineHeight: 1.5,
+                                                    whiteSpace: 'pre-wrap',
+                                                    wordBreak: 'break-word',
+                                                    overflowWrap: 'anywhere',
+                                                }}>
                                                     {entry.notes}
                                                 </p>
                                             )}
@@ -1116,7 +1140,7 @@ const SessionsPage = () => {
 
                                             {/* Heart rate summary inline (for non-GPS / HR sessions) */}
                                             {!analysis && (entry.activityStats?.heartRateAvg || entry.streams?.heartrate) && (
-                                                <div style={{ display: 'flex', gap: '12px', marginTop: '6px', fontSize: '0.8rem', color: '#f87171' }}>
+                                                <div style={{ display: 'flex', gap: '12px', marginTop: '6px', fontSize: '0.8rem', color: '#f87171', flexWrap: 'wrap' }}>
                                                     <span>❤️ <b>{entry.activityStats?.heartRateAvg || '—'}</b> bpm avg</span>
                                                     {entry.activityStats?.heartRateMax && (
                                                         <span style={{ color: '#fb923c' }}><b>{entry.activityStats.heartRateMax}</b> bpm max</span>
@@ -1129,7 +1153,7 @@ const SessionsPage = () => {
 
                                             {/* Gear */}
                                             {entry.gearUsed && (
-                                                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                                                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
                                                     Gear: {entry.gearUsed}
                                                 </div>
                                             )}

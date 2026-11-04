@@ -13,9 +13,11 @@ describe('BestTime - Coach Game Plan Selected Location Priority', () => {
         vi.clearAllMocks();
     });
 
-    const now = new Date();
+    const baseDaytime = new Date();
+    baseDaytime.setDate(baseDaytime.getDate() + 1);
+    baseDaytime.setHours(10, 0, 0, 0);
     const createHourlySlot = (hoursAhead, speedKmh, gustsKmh = speedKmh + 6, direction = 220) => {
-        const d = new Date(now.getTime() + hoursAhead * 3600 * 1000);
+        const d = new Date(baseDaytime.getTime() + hoursAhead * 3600 * 1000);
         return {
             time: d.toISOString(),
             speed: speedKmh,
